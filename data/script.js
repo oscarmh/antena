@@ -1,6 +1,64 @@
 var logScrollPaused = false;
 var logLines = [];
 var MAX_LOG_LINES = 100000;
+var useImperial = false;
+
+function convertTemp(c) {
+  if (c === null || c === undefined || c === "N/A") return c;
+  if (!useImperial) return c;
+  return ((parseFloat(c) * 9 / 5) + 32).toFixed(1);
+}
+function convertSpeed(kph) {
+  if (kph === null || kph === undefined || kph === "N/A") return kph;
+  if (!useImperial) return kph;
+  return (parseFloat(kph) * 0.621371).toFixed(1);
+}
+function convertPrecip(mm) {
+  if (mm === null || mm === undefined || mm === "N/A") return mm;
+  if (!useImperial) return mm;
+  return (parseFloat(mm) / 25.4).toFixed(2);
+}
+function convertSnow(cm) {
+  if (cm === null || cm === undefined || cm === "N/A") return cm;
+  if (!useImperial) return cm;
+  return (parseFloat(cm) / 2.54).toFixed(2);
+}
+function updateUnitLabels() {
+  var e;
+  e = document.getElementById("unitCurrentTemp");
+  if (e) e.innerHTML = useImperial ? "&deg;F" : "&deg;C";
+  e = document.getElementById("unitCurrentPrecip");
+  if (e) e.innerHTML = useImperial ? "in" : "mm";
+  e = document.getElementById("unitCurrentWindSpeed");
+  if (e) e.innerHTML = useImperial ? "mph" : "km/h";
+  e = document.getElementById("unitCurrentWindGust");
+  if (e) e.innerHTML = useImperial ? "mph" : "km/h";
+  e = document.getElementById("unitForecastTemp");
+  if (e) e.innerHTML = useImperial ? "Temp (&deg;F)" : "Temp (&deg;C)";
+  e = document.getElementById("unitForecastWind");
+  if (e) e.innerHTML = useImperial ? "Wind (mph)" : "Wind (km/h)";
+  e = document.getElementById("unitForecastGust");
+  if (e) e.innerHTML = useImperial ? "Gust (mph)" : "Gust (km/h)";
+  e = document.getElementById("unitForecastPrecip");
+  if (e) e.innerHTML = useImperial ? "Precip (in)" : "Precip (mm)";
+  e = document.getElementById("unitForecastSnow");
+  if (e) e.innerHTML = useImperial ? "Snow (in)" : "Snow (cm)";
+  e = document.getElementById("unitWindSpeedThreshold");
+  if (e) e.innerHTML = useImperial ? "mph" : "km/h";
+  e = document.getElementById("unitWindGustThreshold");
+  if (e) e.innerHTML = useImperial ? "mph" : "km/h";
+  // Update validation ranges for speed-converted fields
+  var speedFields = document.querySelectorAll('[data-convert="speed"]');
+  for (var i = 0; i < speedFields.length; i++) {
+    if (useImperial) {
+      speedFields[i].setAttribute('data-min', '6');
+      speedFields[i].setAttribute('data-max', '125');
+    } else {
+      speedFields[i].setAttribute('data-min', '10');
+      speedFields[i].setAttribute('data-max', '200');
+    }
+  }
+}
 
 function xget(url,cb){var x=new XMLHttpRequest();x.open("GET",url,true);if(cb)x.onreadystatechange=function(){if(x.readyState==4)cb(x)};x.send()}
 // s() — set innerHTML, but skip if an inline edit is active in the element
@@ -86,10 +144,13 @@ function fetchConfig() {
     s("weatherLatitude",data.weatherLatitude);
     s("weatherLongitude",data.weatherLongitude);
     s("showSunMoon",data.showSunMoon);
+    s("weatherUnits",data.weatherUnits);
+    useImperial = (data.weatherUnits === "Imperial");
+    updateUnitLabels();
     s("windSafetyEnabled",data.windSafetyEnabled);
     s("windBasedHomeEnabled",data.windBasedHomeEnabled);
-    s("windSpeedThreshold",data.windSpeedThreshold);
-    s("windGustThreshold",data.windGustThreshold);
+    s("windSpeedThreshold",convertSpeed(data.windSpeedThreshold));
+    s("windGustThreshold",convertSpeed(data.windGustThreshold));
     s("autoHomeEnabled",data.autoHomeEnabled);
     s("autoHomeMins",data.autoHomeMins);
     s("smoothTrackingEnabled",data.smoothTrackingEnabled);
@@ -218,12 +279,12 @@ setInterval(function() {
       s("weatherDataValid",data.weatherDataValid);
       s("weatherLastUpdate",data.weatherLastUpdate);
 
-      s("currentWindSpeed",data.currentWindSpeed);
+      s("currentWindSpeed",convertSpeed(data.currentWindSpeed));
       s("currentWindDirection",formatWindDirection(data.currentWindDirection));
-      s("currentWindGust",data.currentWindGust);
+      s("currentWindGust",convertSpeed(data.currentWindGust));
       s("currentWeatherTime",formatWeatherTime(data.currentWeatherTime));
-      s("currentTempC",data.currentTempC != null ? data.currentTempC : "N/A");
-      s("currentPrecipMm",data.currentPrecipMm != null ? data.currentPrecipMm : "N/A");
+      s("currentTempC",data.currentTempC != null ? convertTemp(data.currentTempC) : "N/A");
+      s("currentPrecipMm",data.currentPrecipMm != null ? convertPrecip(data.currentPrecipMm) : "N/A");
       s("currentHumidity",data.currentHumidity != null ? data.currentHumidity : "N/A");
       s("currentConditionText",data.currentConditionText || "N/A");
       var stormEl = document.getElementById("currentIsThunderstorm");
@@ -245,13 +306,13 @@ setInterval(function() {
           var gust = (data.forecastWindGust.length > i) ? data.forecastWindGust[i] : null;
 
           s("forecastTime" + i,formatWeatherTime(time));
-          s("forecastWindSpeed" + i,(speed !== null) ? speed : "N/A");
+          s("forecastWindSpeed" + i,(speed !== null) ? convertSpeed(speed) : "N/A");
           s("forecastWindDirection" + i,formatWindDirection(direction));
-          s("forecastWindGust" + i,(gust !== null) ? gust : "N/A");
+          s("forecastWindGust" + i,(gust !== null) ? convertSpeed(gust) : "N/A");
           s("forecastCondition" + i, data.forecastConditionText && data.forecastConditionText[i] ? data.forecastConditionText[i] : "N/A");
-          s("forecastTemp" + i, data.forecastTempC && data.forecastTempC[i] != null ? data.forecastTempC[i] : "N/A");
-          s("forecastPrecip" + i, data.forecastPrecipMm && data.forecastPrecipMm[i] != null ? data.forecastPrecipMm[i] : "N/A");
-          s("forecastSnow" + i, data.forecastSnowCm && data.forecastSnowCm[i] != null ? data.forecastSnowCm[i] : "N/A");
+          s("forecastTemp" + i, data.forecastTempC && data.forecastTempC[i] != null ? convertTemp(data.forecastTempC[i]) : "N/A");
+          s("forecastPrecip" + i, data.forecastPrecipMm && data.forecastPrecipMm[i] != null ? convertPrecip(data.forecastPrecipMm[i]) : "N/A");
+          s("forecastSnow" + i, data.forecastSnowCm && data.forecastSnowCm[i] != null ? convertSnow(data.forecastSnowCm[i]) : "N/A");
           s("forecastHumidity" + i, data.forecastHumidity && data.forecastHumidity[i] != null ? data.forecastHumidity[i] : "N/A");
           var fStormEl = document.getElementById("forecastStorm" + i);
           if (fStormEl && !fStormEl.querySelector('input,select')) {
@@ -928,7 +989,14 @@ document.addEventListener('click', function(e) {
 
       span.textContent = newValue;
 
-      var body = encodeURIComponent(param) + '=' + encodeURIComponent(newValue);
+      // Convert displayed value back to metric for server submission
+      var submitValue = newValue;
+      var convertAttr = span.getAttribute('data-convert');
+      if (convertAttr === 'speed' && useImperial) {
+        submitValue = (parseFloat(newValue) / 0.621371).toFixed(1);
+      }
+
+      var body = encodeURIComponent(param) + '=' + encodeURIComponent(submitValue);
 
       // If this field has a paired field, include its current value too
       var pairAttr = span.getAttribute('data-pair');

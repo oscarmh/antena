@@ -41,6 +41,9 @@ void WeatherPoller::begin() {
     // Load sun/moon display preference
     _showSunMoon = _preferences.getBool("showSunMoon", true);
 
+    // Load unit display preference
+    _useImperial = _preferences.getBool("useImperial", false);
+
     // Load wind safety configuration
     _windSafetyEnabled = _preferences.getBool("wind_safety_en", false);
     _windSpeedThreshold = _preferences.getFloat("wind_speed_thr", 50.0);
@@ -837,6 +840,16 @@ void WeatherPoller::setShowSunMoon(bool enabled) {
 
 bool WeatherPoller::isShowSunMoon() {
     return _showSunMoon.load();
+}
+
+void WeatherPoller::setUseImperial(bool enabled) {
+    _useImperial = enabled;
+    _preferences.putBool("useImperial", enabled);
+    _logger.info("Weather units set to " + String(enabled ? "Imperial" : "Metric"));
+}
+
+bool WeatherPoller::isUseImperial() {
+    return _useImperial.load();
 }
 
 // =============================================================================

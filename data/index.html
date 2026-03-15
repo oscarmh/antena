@@ -528,13 +528,18 @@
         <td>Show sun and moon positions on the compass</td>
       </tr>
       <tr>
+        <td>Weather Units</td>
+        <td><span id="weatherUnits" class="editable" data-type="toggle" data-on-url="/unitsImperial" data-off-url="/unitsMetric" data-on-label="Imperial" data-off-label="Metric">Loading...</span></td>
+        <td>Display weather in Imperial or Metric units</td>
+      </tr>
+      <tr>
         <td>Wind Speed Threshold</td>
-        <td><span id="windSpeedThreshold" class="editable" data-param="windSpeedThreshold" data-endpoint="/setWindThresholds" data-input-type="number" data-min="10" data-max="200">Loading...</span> km/h</td>
+        <td><span id="windSpeedThreshold" class="editable" data-param="windSpeedThreshold" data-endpoint="/setWindThresholds" data-input-type="number" data-min="10" data-max="200" data-convert="speed">Loading...</span> <span id="unitWindSpeedThreshold">km/h</span></td>
         <td>Max sustained wind speed before emergency stow</td>
       </tr>
       <tr>
         <td>Wind Gust Threshold</td>
-        <td><span id="windGustThreshold" class="editable" data-param="windGustThreshold" data-endpoint="/setWindThresholds" data-input-type="number" data-min="10" data-max="200">Loading...</span> km/h</td>
+        <td><span id="windGustThreshold" class="editable" data-param="windGustThreshold" data-endpoint="/setWindThresholds" data-input-type="number" data-min="10" data-max="200" data-convert="speed">Loading...</span> <span id="unitWindGustThreshold">km/h</span></td>
         <td>Max wind gust before emergency stow</td>
       </tr>
       <tr>
@@ -621,7 +626,7 @@
       <tr>
         <td>Temperature</td>
         <td><span id="currentTempC">N/A</span></td>
-        <td>&deg;C</td>
+        <td><span id="unitCurrentTemp">&deg;C</span></td>
       </tr>
       <tr>
         <td>Humidity</td>
@@ -631,12 +636,12 @@
       <tr>
         <td>Precipitation</td>
         <td><span id="currentPrecipMm">N/A</span></td>
-        <td>mm</td>
+        <td><span id="unitCurrentPrecip">mm</span></td>
       </tr>
       <tr>
         <td>Wind Speed</td>
         <td><span id="currentWindSpeed">N/A</span></td>
-        <td>km/h</td>
+        <td><span id="unitCurrentWindSpeed">km/h</span></td>
       </tr>
       <tr>
         <td>Wind Direction</td>
@@ -646,7 +651,7 @@
       <tr>
         <td>Wind Gusts</td>
         <td><span id="currentWindGust">N/A</span></td>
-        <td>km/h</td>
+        <td><span id="unitCurrentWindGust">km/h</span></td>
       </tr>
       <tr>
         <td>Lightning/Storm</td>
@@ -661,17 +666,18 @@
     </table>
 
     <h3>Weather Forecast (Next 3 Hours)</h3>
+    <div class="table-scroll-container">
     <table>
       <tr>
         <th>Hour</th>
         <th>Time</th>
         <th>Condition</th>
-        <th>Temp (&deg;C)</th>
-        <th>Wind (km/h)</th>
+        <th><span id="unitForecastTemp">Temp (&deg;C)</span></th>
+        <th><span id="unitForecastWind">Wind (km/h)</span></th>
         <th>Dir (&deg;)</th>
-        <th>Gust (km/h)</th>
-        <th>Precip (mm)</th>
-        <th>Snow (cm)</th>
+        <th><span id="unitForecastGust">Gust (km/h)</span></th>
+        <th><span id="unitForecastPrecip">Precip (mm)</span></th>
+        <th><span id="unitForecastSnow">Snow (cm)</span></th>
         <th>Humidity (%)</th>
         <th>Storm</th>
       </tr>
@@ -715,6 +721,7 @@
         <td><span id="forecastStorm2">N/A</span></td>
       </tr>
     </table>
+    </div>
 
     <h3>Sun & Moon Position</h3>
     <table>

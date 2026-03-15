@@ -104,6 +104,10 @@ public:
     void setShowSunMoon(bool enabled);
     bool isShowSunMoon();
 
+    // Unit display toggle
+    void setUseImperial(bool enabled);
+    bool isUseImperial();
+
     // Wind safety methods
     void setWindSafetyEnabled(bool enabled);
     bool isWindSafetyEnabled();
@@ -132,6 +136,9 @@ private:
     
     // Sun/Moon display
     std::atomic<bool> _showSunMoon{true};
+
+    // Unit display preference
+    std::atomic<bool> _useImperial{false};
 
     // Wind safety configuration
     std::atomic<bool> _windSafetyEnabled{false};

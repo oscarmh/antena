@@ -677,6 +677,16 @@ void WebServerManager::setupConfigurationRoutes() {
         server->send(200, "text/plain", "Sun/Moon compass display OFF");
     });
 
+    server->on("/unitsImperial", HTTP_GET, [this]() {
+        weatherPoller.setUseImperial(true);
+        server->send(200, "text/plain", "Weather units set to Imperial");
+    });
+
+    server->on("/unitsMetric", HTTP_GET, [this]() {
+        weatherPoller.setUseImperial(false);
+        server->send(200, "text/plain", "Weather units set to Metric");
+    });
+
     server->on("/setWindThresholds", HTTP_POST, [this]() {
         bool updated = false;
         
@@ -978,6 +988,9 @@ void WebServerManager::setupAPIRoutes() {
 
         // Sun/Moon display
         doc["showSunMoon"] = weatherPoller.isShowSunMoon() ? "ON" : "OFF";
+
+        // Weather units
+        doc["weatherUnits"] = weatherPoller.isUseImperial() ? "Imperial" : "Metric";
 
         // Wind safety configuration
         doc["windSafetyEnabled"] = weatherPoller.isWindSafetyEnabled() ? "ON" : "OFF";

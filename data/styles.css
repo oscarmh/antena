@@ -463,6 +463,7 @@ th {
 .danger-btn{background-color:#dc3545}
 .danger-btn:hover{background-color:#c82333}
 .storm-yes{color:#dc3545;font-weight:bold}
+.table-scroll-container{overflow-x:auto;-webkit-overflow-scrolling:touch}
 
 /* Zebra stripe tables */
 table tr:nth-child(even):not(.section-divider) {
