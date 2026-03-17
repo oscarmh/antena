@@ -33,6 +33,13 @@ WiFiManager::WiFiManager(Preferences& prefs, Logger& logger) : _preferences(pref
 void WiFiManager::begin() {
     _hostname = _preferences.getString("hostname", "discoverydrive");
     _httpPort = _preferences.getInt("http_port", 80);
+
+    if (_preferences.getBool("wifiDisabled", false)) {
+        wifiDisabled = true;
+        _logger.info("WiFi permanently disabled by user preference");
+        return;
+    }
+
     connectToWiFi();
 }
 
@@ -218,6 +225,34 @@ String WiFiManager::getHostname() {
     return _hostname;
 }
 
+// WiFi disable/enable methods
+void WiFiManager::disableWiFi(bool persistent) {
+    wifiDisabled = true;
+    if (persistent) {
+        _preferences.putBool("wifiDisabled", true);
+    }
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    wifiConnected = false;
+    _logger.info("WiFi disabled" + String(persistent ? " (persistent)" : " (until reboot)"));
+}
+
+void WiFiManager::enableWiFi(bool persistent) {
+    if (persistent) {
+        _preferences.putBool("wifiDisabled", false);
+    }
+    wifiDisabled = false;
+    if (sta_netif == NULL) {
+        // WiFi was never initialized (persistent disable at boot) — full init
+        connectToWiFi();
+    } else {
+        // WiFi was previously running — just restart
+        esp_wifi_start();
+        esp_wifi_connect();
+    }
+    _logger.info("WiFi enabled" + String(persistent ? " (persistent)" : " (until reboot)"));
+}
+
 // Static event handler
 void WiFiManager::wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     WiFiManager* inst = _instance;  // Local copy
@@ -264,6 +299,9 @@ void WiFiManager::wifi_event_handler(void* arg, esp_event_base_t event_base, int
                 wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
                 uint8_t reason = event->reason;
                 inst->_logger.error("WiFi disconnected. Reason: " + String(reason));
+
+                // Don't reconnect if WiFi was intentionally disabled
+                if (inst->wifiDisabled.load()) return;
 
                 // Roaming-related reasons — the ESP-IDF 802.11k/v/r stack is
                 // transitioning to a new AP.  Don't mark WiFi as down; just

@@ -26,6 +26,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <ESPmDNS.h>
+#include <atomic>
 
 // ESP-IDF includes
 #include "esp_wifi.h"
@@ -54,9 +55,14 @@ public:
     int getSignalStrengthLevel(int32_t rssi);
     String getHostname();
     
+    // WiFi disable/enable (for S-band interference avoidance)
+    void disableWiFi(bool persistent);
+    void enableWiFi(bool persistent);
+
     // Public state variables
     String ip_addr = "0.0.0.0";
     bool wifiConnected = false;
+    std::atomic<bool> wifiDisabled{false};
     
 private:
     // Core references

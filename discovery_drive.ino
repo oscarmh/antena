@@ -86,12 +86,14 @@ void setup() {
   logger.begin();
   // Initialize the serial connection
   serialManager.begin();
+  serialManager.setWiFiManager(&wifiManager);
   // Begin and connect to WiFi
   wifiManager.begin();
-  // Initialize rotctl server
-  rotctlWifi.begin();
-  // Begin web server
-  webServerManager.begin();
+  // Initialize network servers only if WiFi is enabled
+  if (!wifiManager.wifiDisabled.load()) {
+    rotctlWifi.begin();
+    webServerManager.begin();
+  }
   // Create shared I2C bus mutex — prevents bus contention between
   // ControlMotors (AS5600 sensors) and ReadPowerSensor (INA219)
   SemaphoreHandle_t i2cMutex = xSemaphoreCreateMutex();
@@ -218,6 +220,14 @@ void HandleWebRequests(void *pvParameters) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xFrequency = 20 / portTICK_PERIOD_MS;
   for(;;) {
+    if (wifiManager.wifiDisabled.load()) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    // Lazy-init: start web server after WiFi re-enabled from persistent disable
+    if (webServerManager.server == nullptr) {
+      webServerManager.begin();
+    }
     webServerManager.server->handleClient();
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -269,8 +279,12 @@ void PollWeather(void *pvParameters){
 
   for(;;)
   {
+    if (wifiManager.wifiDisabled.load()) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
     weatherPoller.runWeatherLoop(wifiManager.wifiConnected);
-    
+
     // Adjust frequency based on wind safety status
     if (weatherPoller.isWindSafetyEnabled() && weatherPoller.shouldActivateEmergencyStow()) {
       // Poll more frequently during active wind stow conditions
@@ -294,8 +308,16 @@ void ReadWiFi(void *pvParameters){
 
   for(;;)
   {
+  if (wifiManager.wifiDisabled.load()) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    continue;
+  }
+  // Lazy-init: start rotctl server after WiFi re-enabled from persistent disable
+  if (!rotctlWifi.isInitialized()) {
+    rotctlWifi.begin();
+  }
   rotctlWifi.rotctlWifiLoop(serialManager.serialActive, stellariumPoller.getStellariumOn());
-  xFrequency = rotctlWifi.isRotctlConnected() ? 
+  xFrequency = rotctlWifi.isRotctlConnected() ?
           pdMS_TO_TICKS(10) : pdMS_TO_TICKS(1000);
   vTaskDelayUntil(&xLastWakeTime, xFrequency);
   // ------------------------------------------------------------------------

@@ -62,7 +62,7 @@ public:
     void setLoginPassword(String loginPassword);
 
     // Public members
-    WebServer* server;
+    WebServer* server = nullptr;
     String wifi_ssid = "";
     String wifi_password = "";
 

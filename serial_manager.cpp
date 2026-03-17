@@ -19,6 +19,7 @@
 // Implements the EasyComm II Serial Protocol
 
 #include "serial_manager.h"
+#include "wifi_manager.h"
 
 // =============================================================================
 // CONSTRUCTOR AND INITIALIZATION
@@ -75,6 +76,7 @@ void SerialManager::processCommand() {
     if (processPositionCommands()) return;
     if (processSetPositionCommands()) return;
     if (processCalibrationCommands()) return;
+    if (processWiFiCommands(_inputString)) return;
     if (processSystemCommands()) return;
     
     // If no command matched, log unknown command
@@ -234,6 +236,40 @@ bool SerialManager::processCalibrationCommands() {
     return false;
 }
 
+void SerialManager::setWiFiManager(WiFiManager* wm) {
+    _wifiManager = wm;
+}
+
+bool SerialManager::processWiFiCommands(const String& input) {
+    if (!_wifiManager) return false;
+
+    if (input.startsWith("WIFI_OFF_P")) {
+        _wifiManager->disableWiFi(true);
+        Serial.println("WiFi permanently disabled. Use WIFI_ON_P to re-enable.");
+        updateSerialActivity();
+        return true;
+    }
+    if (input.startsWith("WIFI_ON_P")) {
+        _wifiManager->enableWiFi(true);
+        Serial.println("WiFi permanently enabled.");
+        updateSerialActivity();
+        return true;
+    }
+    if (input.startsWith("WIFI_OFF")) {
+        _wifiManager->disableWiFi(false);
+        Serial.println("WiFi disabled until reboot. Use WIFI_ON to re-enable.");
+        updateSerialActivity();
+        return true;
+    }
+    if (input.startsWith("WIFI_ON")) {
+        _wifiManager->enableWiFi(false);
+        Serial.println("WiFi enabled.");
+        updateSerialActivity();
+        return true;
+    }
+    return false;
+}
+
 bool SerialManager::processSystemCommands() {
     if (_inputString.startsWith("RESET_WEB_PW")) {
         _preferences.putString("loginUser", "");
@@ -358,6 +394,9 @@ void SerialManager::printStatusInfo() {
     
     // === NETWORK CONFIGURATION ===
     Serial.println("--- Network Configuration ---");
+    if (_wifiManager && _wifiManager->wifiDisabled.load()) {
+        Serial.println("WiFi:           DISABLED");
+    }
     Serial.println("HTTP Port: " + String(_preferences.getInt("http_port", 80)));
     Serial.println("Rotctl Port: " + String(_preferences.getInt("rotctl_port", 4533)));
     Serial.println("WiFi SSID: " + _preferences.getString("wifi_ssid", "discoverydish_HOTSPOT"));

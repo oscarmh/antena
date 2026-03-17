@@ -37,6 +37,7 @@ public:
     
     String getRotctlClientIP();
     bool isRotctlConnected();
+    bool isInitialized() { return _rotator_server != nullptr; }
 
 private:
     static const unsigned long CLIENT_TIMEOUT = 10000;  // 10 seconds timeout
@@ -63,7 +64,7 @@ private:
     MotorSensorController& _motorSensorCtrl;
     Preferences& _preferences;
     
-    WiFiServer* _rotator_server;
+    WiFiServer* _rotator_server = nullptr;
     WiFiClient _rotator_client;
     String _rotctl_client_ip = "NO ROTCTL CONNECTION";
     unsigned long _lastClientActivity = 0;

@@ -27,6 +27,8 @@
 #include "motor_controller.h"
 #include "logger.h"
 
+class WiFiManager;
+
 class SerialManager {
 public:
     // Constructor
@@ -35,6 +37,7 @@ public:
     // Core functionality
     void begin();
     void runSerialLoop();
+    void setWiFiManager(WiFiManager* wm);
 
     // Public state variables
     std::atomic<bool> serialActive = false;
@@ -44,6 +47,7 @@ private:
     Preferences& _preferences;
     MotorSensorController& _motorSensorCtrl;
     Logger& _logger;
+    WiFiManager* _wifiManager = nullptr;
 
     // Core functionality helpers
     void readSerialInput();
@@ -56,6 +60,7 @@ private:
     bool processPositionCommands();
     bool processSetPositionCommands();
     bool processCalibrationCommands();
+    bool processWiFiCommands(const String& input);
     bool processSystemCommands();
 
     // Utility methods
