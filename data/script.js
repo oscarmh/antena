@@ -1039,3 +1039,9 @@ document.addEventListener('click', function(e) {
     });
   }
 });
+
+// Fetch and display firmware version
+fetch('/version').then(function(r) { return r.text(); }).then(function(v) {
+  var el = document.getElementById('firmwareVersion');
+  if (el) el.textContent = 'Firmware v' + v;
+});

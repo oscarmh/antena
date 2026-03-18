@@ -171,6 +171,10 @@ void WebServerManager::setupSystemControlRoutes() {
             server->send(400, "text/plain", "Missing disabled parameter");
         }
     });
+
+    server->on("/version", HTTP_GET, [this]() {
+        server->send(200, "text/plain", firmwareVersion);
+    });
 }
 
 void WebServerManager::setupMotorControlRoutes() {

@@ -63,6 +63,7 @@ public:
 
     // Public members
     WebServer* server = nullptr;
+    const char* firmwareVersion = "unknown";
     String wifi_ssid = "";
     String wifi_password = "";
 

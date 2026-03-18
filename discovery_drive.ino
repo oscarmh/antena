@@ -33,6 +33,9 @@
 #define ARDUINO_RUNNING_CORE 1
 #endif
 
+// Firmware version
+const char* FIRMWARE_VERSION = "2.0.1";
+
 // i2c PIN Settings
 const int _SDA_PIN = 7;
 const int _SCL_PIN = 6;
@@ -87,6 +90,7 @@ void setup() {
   // Initialize the serial connection
   serialManager.begin();
   serialManager.setWiFiManager(&wifiManager);
+  webServerManager.firmwareVersion = FIRMWARE_VERSION;
   // Begin and connect to WiFi
   wifiManager.begin();
   // Initialize network servers only if WiFi is enabled
