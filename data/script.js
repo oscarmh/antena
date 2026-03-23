@@ -2,6 +2,10 @@ var logScrollPaused = false;
 var logLines = [];
 var MAX_LOG_LINES = 100000;
 var useImperial = false;
+var cachedWindDir = null;
+var cachedWeatherValid = false;
+var cachedEmergencyStow = "NO";
+var cachedWindStowReason = "";
 
 function convertTemp(c) {
   if (c === null || c === undefined || c === "N/A") return c;
@@ -153,6 +157,15 @@ function fetchConfig() {
     s("windGustThreshold",convertSpeed(data.windGustThreshold));
     s("autoHomeEnabled",data.autoHomeEnabled);
     s("autoHomeMins",data.autoHomeMins);
+    s("singleMotorModeText",data.singleMotorModeText);
+    s("directionLockStatus",data.directionLockEnabled);
+    s("directionLockSetting",data.directionLockEnabled);
+    s("safeModeStatus",data.safeMode);
+    var safeCb = document.getElementById('safeModeToggle');
+    if (safeCb) safeCb.checked = (data.safeMode === "ON");
+    var safeLbl = document.getElementById('safeModeLabel');
+    if (safeLbl) safeLbl.textContent = (data.safeMode === "ON") ? "SAFE MODE ON" : "SAFE MODE";
+    s("smoothTrackingActive",data.smoothTrackingActive);
     s("smoothTrackingEnabled",data.smoothTrackingEnabled);
     s("smKalQ",data.smKalQ);
     s("smKalR",data.smKalR);
@@ -190,60 +203,23 @@ setInterval(function() {
       s("error_el",data.error_el);
       s("el_startAngle",data.el_startAngle);
       s("needs_unwind",data.needs_unwind);
-      s("calMode",data.calMode);
-      var calSec = document.getElementById("calMoveSection");
-      if (calSec) calSec.style.display = (data.calMode === "ON") ? "block" : "none";
       s("i2cErrorFlag_az",data.i2cErrorFlag_az);
       s("i2cErrorFlag_el",data.i2cErrorFlag_el);
       s("badAngleFlag",data.badAngleFlag);
       s("magnetFault",data.magnetFault);
       s("faultTripped",data.faultTripped);
-      s("serialActive",data.serialActive);
-      s("singleMotorModeText",data.singleMotorModeText);
       s("isAzMotorLatched",data.isAzMotorLatched);
       s("isElMotorLatched",data.isElMotorLatched);
       s("motorSpeedPctAz",data.motorSpeedPctAz);
       s("motorSpeedPctEl",data.motorSpeedPctEl);
-      s("stellariumConnActive",data.stellariumConnActive);
       s("inputVoltage",data.inputVoltage);
       s("currentDraw",data.currentDraw);
       s("rotatorPowerDraw",data.rotatorPowerDraw);
-      s("ip_addr",data.ip_addr);
-      s("rotctl_client_ip",data.rotctl_client_ip);
-      s("bssid",data.bssid);
-      s("wifi_channel",data.wifi_channel);
-
-      s("rssi",data.rssi);
-      var level = data.level;
-      for(var i=1;i<5;i++)document.getElementById('bar'+i).classList.toggle('active',level>=i);
-
-      s("windStowActive",data.windStowActive);
-      s("windStowReason",data.windStowReason);
-      s("windTrackingActive",data.windTrackingActive);
-      s("windTrackingStatus",data.windTrackingStatus);
-      s("emergencyStowActive",data.emergencyStowActive);
-      s("stowDirection",data.stowDirection);
-
-      s("directionLockStatus",data.directionLockEnabled);
-      s("directionLockSetting",data.directionLockEnabled);
-      s("smoothTrackingActive",data.smoothTrackingActive);
-
-      s("safeModeStatus",data.safeMode);
-      var safeCb = document.getElementById('safeModeToggle');
-      if (safeCb) safeCb.checked = (data.safeMode === "ON");
-      var safeLbl = document.getElementById('safeModeLabel');
-      if (safeLbl) safeLbl.textContent = (data.safeMode === "ON") ? "SAFE MODE ON" : "SAFE MODE";
-
-      s("extendedElEnabled",data.extendedElEnabled);
-      var elSetpointLabel = document.getElementById("elSetpointLabel");
-      if (elSetpointLabel) {
-        elSetpointLabel.innerHTML = (data.extendedElEnabled === "ON") ? "Set Elevation (-90 - 90):" : "Set Elevation (0 - 90):";
-      }
 
       var windStowAlert = document.getElementById("windStowAlert");
       var windStowMessage = document.getElementById("windStowMessage");
-      if (data.emergencyStowActive === "YES") {
-        windStowMessage.innerHTML = "EMERGENCY WIND STOW ACTIVE: " + data.windStowReason;
+      if (cachedEmergencyStow === "YES") {
+        windStowMessage.innerHTML = "EMERGENCY WIND STOW ACTIVE: " + cachedWindStowReason;
         windStowAlert.style.display = "block";
       } else {
         windStowAlert.style.display = "none";
@@ -265,8 +241,6 @@ setInterval(function() {
 
       updateDebugLevelDisplay(data.currentDebugLevel);
 
-      s("serialOutputDisabled",data.serialOutputDisabled ? "True" : "False");
-
       var azimuth = data.correctedAngle_az;
       var elevation = data.correctedAngle_el;
       var setpoint_az = data.setpoint_az;
@@ -275,75 +249,6 @@ setInterval(function() {
       var kalmanEl = data.kalmanElPos != null ? parseFloat(data.kalmanElPos) : null;
       if (data.kalmanAzVel) s("kalmanAzVel", data.kalmanAzVel + " deg/s");
       if (data.kalmanElVel) s("kalmanElVel", data.kalmanElVel + " deg/s");
-
-      s("weatherDataValid",data.weatherDataValid);
-      s("weatherLastUpdate",data.weatherLastUpdate);
-
-      s("currentWindSpeed",convertSpeed(data.currentWindSpeed));
-      s("currentWindDirection",formatWindDirection(data.currentWindDirection));
-      s("currentWindGust",convertSpeed(data.currentWindGust));
-      s("currentWeatherTime",formatWeatherTime(data.currentWeatherTime));
-      s("currentTempC",data.currentTempC != null ? convertTemp(data.currentTempC) : "N/A");
-      s("currentPrecipMm",data.currentPrecipMm != null ? convertPrecip(data.currentPrecipMm) : "N/A");
-      s("currentHumidity",data.currentHumidity != null ? data.currentHumidity : "N/A");
-      s("currentConditionText",data.currentConditionText || "N/A");
-      var stormEl = document.getElementById("currentIsThunderstorm");
-      if (stormEl && !stormEl.querySelector('input,select')) {
-        stormEl.innerHTML = (data.currentIsThunderstorm === "YES") ? "YES" : "No";
-        stormEl.className = (data.currentIsThunderstorm === "YES") ? "storm-yes" : "";
-      }
-
-      var hasForecastData = data.forecastWindSpeed &&
-                            data.forecastWindDirection &&
-                            data.forecastWindGust &&
-                            data.forecastTimes;
-
-      if (hasForecastData) {
-        for (var i = 0; i < 3; i++) {
-          var time = (data.forecastTimes.length > i) ? data.forecastTimes[i] : null;
-          var speed = (data.forecastWindSpeed.length > i) ? data.forecastWindSpeed[i] : null;
-          var direction = (data.forecastWindDirection.length > i) ? data.forecastWindDirection[i] : null;
-          var gust = (data.forecastWindGust.length > i) ? data.forecastWindGust[i] : null;
-
-          s("forecastTime" + i,formatWeatherTime(time));
-          s("forecastWindSpeed" + i,(speed !== null) ? convertSpeed(speed) : "N/A");
-          s("forecastWindDirection" + i,formatWindDirection(direction));
-          s("forecastWindGust" + i,(gust !== null) ? convertSpeed(gust) : "N/A");
-          s("forecastCondition" + i, data.forecastConditionText && data.forecastConditionText[i] ? data.forecastConditionText[i] : "N/A");
-          s("forecastTemp" + i, data.forecastTempC && data.forecastTempC[i] != null ? convertTemp(data.forecastTempC[i]) : "N/A");
-          s("forecastPrecip" + i, data.forecastPrecipMm && data.forecastPrecipMm[i] != null ? convertPrecip(data.forecastPrecipMm[i]) : "N/A");
-          s("forecastSnow" + i, data.forecastSnowCm && data.forecastSnowCm[i] != null ? convertSnow(data.forecastSnowCm[i]) : "N/A");
-          s("forecastHumidity" + i, data.forecastHumidity && data.forecastHumidity[i] != null ? data.forecastHumidity[i] : "N/A");
-          var fStormEl = document.getElementById("forecastStorm" + i);
-          if (fStormEl && !fStormEl.querySelector('input,select')) {
-            var isStorm = data.forecastIsThunderstorm && data.forecastIsThunderstorm[i] === "YES";
-            fStormEl.innerHTML = isStorm ? "YES" : "No";
-            fStormEl.className = isStorm ? "storm-yes" : "";
-          }
-        }
-      } else {
-        for (var i = 0; i < 3; i++) {
-          s("forecastTime" + i,"N/A");
-          s("forecastWindSpeed" + i,"N/A");
-          s("forecastWindDirection" + i,"N/A");
-          s("forecastWindGust" + i,"N/A");
-          s("forecastCondition" + i,"N/A");
-          s("forecastTemp" + i,"N/A");
-          s("forecastPrecip" + i,"N/A");
-          s("forecastSnow" + i,"N/A");
-          s("forecastHumidity" + i,"N/A");
-          s("forecastStorm" + i,"N/A");
-        }
-      }
-
-      var weatherErrorDiv = document.getElementById("weatherErrorDiv");
-      var weatherError = document.getElementById("weatherError");
-      if (data.weatherError && data.weatherError !== "") {
-        weatherError.innerHTML = "Error: " + data.weatherError;
-        weatherErrorDiv.style.display = "block";
-      } else {
-        weatherErrorDiv.style.display = "none";
-      }
 
       // Calculate sun/moon positions if enabled
       var showSunMoonEl = document.getElementById("showSunMoon");
@@ -376,13 +281,147 @@ setInterval(function() {
       drawSkyplane();
       drawSunMoon(sunPos, moonPos);
       drawPositions(azimuth, elevation, setpoint_az, setpoint_el, kalmanAz, kalmanEl);
-      drawWindDirection(data.currentWindDirection, data.weatherDataValid === "YES");
+      drawWindDirection(cachedWindDir, cachedWeatherValid);
     }
   };
   xhr.ontimeout = function() { pollInFlight = false; };
   xhr.onerror = function() { pollInFlight = false; };
   xhr.send();
 }, 250);
+
+// Slow-changing info polling (network, weather, wind safety)
+var infoPollInFlight = false;
+setInterval(function() {
+  if (infoPollInFlight) return;
+  infoPollInFlight = true;
+  var xhr = new XMLHttpRequest();
+  xhr.timeout = 5000;
+  xhr.open("GET", "/info", true);
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState == 4) {
+      infoPollInFlight = false;
+      if (xhr.status != 200) return;
+      var data;
+      try { data = JSON.parse(xhr.responseText); } catch(e) { return; }
+
+      // Network
+      s("ip_addr", data.ip_addr);
+      s("rotctl_client_ip", data.rotctl_client_ip);
+      s("bssid", data.bssid);
+      s("wifi_channel", data.wifi_channel);
+      s("rssi", data.rssi);
+      var level = data.level;
+      for(var i=1;i<5;i++) document.getElementById('bar'+i).classList.toggle('active',level>=i);
+
+      // Slow-changing status flags
+      s("extendedElEnabled", data.extendedElEnabled);
+      var elSetpointLabel = document.getElementById("elSetpointLabel");
+      if (elSetpointLabel) {
+        elSetpointLabel.innerHTML = (data.extendedElEnabled === "ON") ? "Set Elevation (-90 - 90):" : "Set Elevation (0 - 90):";
+      }
+      s("stellariumConnActive", data.stellariumConnActive);
+      s("serialOutputDisabled", data.serialOutputDisabled ? "True" : "False");
+      s("calMode", data.calMode);
+      var calSec = document.getElementById("calMoveSection");
+      if (calSec) calSec.style.display = (data.calMode === "ON") ? "block" : "none";
+      s("serialActive", data.serialActive);
+      s("singleMotorModeText", data.singleMotorModeText);
+      s("directionLockStatus", data.directionLockEnabled);
+      s("directionLockSetting", data.directionLockEnabled);
+      s("smoothTrackingActive", data.smoothTrackingActive);
+      s("safeModeStatus", data.safeMode);
+      var safeCb = document.getElementById('safeModeToggle');
+      if (safeCb) safeCb.checked = (data.safeMode === "ON");
+      var safeLbl = document.getElementById('safeModeLabel');
+      if (safeLbl) safeLbl.textContent = (data.safeMode === "ON") ? "SAFE MODE ON" : "SAFE MODE";
+
+      // Weather data
+      s("weatherDataValid", data.weatherDataValid);
+      s("weatherLastUpdate", data.weatherLastUpdate);
+      s("currentWindSpeed", convertSpeed(data.currentWindSpeed));
+      s("currentWindDirection", formatWindDirection(data.currentWindDirection));
+      s("currentWindGust", convertSpeed(data.currentWindGust));
+      s("currentWeatherTime", formatWeatherTime(data.currentWeatherTime));
+      s("currentTempC", data.currentTempC != null ? convertTemp(data.currentTempC) : "N/A");
+      s("currentPrecipMm", data.currentPrecipMm != null ? convertPrecip(data.currentPrecipMm) : "N/A");
+      s("currentHumidity", data.currentHumidity != null ? data.currentHumidity : "N/A");
+      s("currentConditionText", data.currentConditionText || "N/A");
+      var stormEl = document.getElementById("currentIsThunderstorm");
+      if (stormEl && !stormEl.querySelector('input,select')) {
+        stormEl.innerHTML = (data.currentIsThunderstorm === "YES") ? "YES" : "No";
+        stormEl.className = (data.currentIsThunderstorm === "YES") ? "storm-yes" : "";
+      }
+
+      // Forecast data
+      var hasForecastData = data.forecastWindSpeed &&
+                            data.forecastWindDirection &&
+                            data.forecastWindGust &&
+                            data.forecastTimes;
+      if (hasForecastData) {
+        for (var i = 0; i < 3; i++) {
+          var time = (data.forecastTimes.length > i) ? data.forecastTimes[i] : null;
+          var speed = (data.forecastWindSpeed.length > i) ? data.forecastWindSpeed[i] : null;
+          var direction = (data.forecastWindDirection.length > i) ? data.forecastWindDirection[i] : null;
+          var gust = (data.forecastWindGust.length > i) ? data.forecastWindGust[i] : null;
+          s("forecastTime" + i, formatWeatherTime(time));
+          s("forecastWindSpeed" + i, (speed !== null) ? convertSpeed(speed) : "N/A");
+          s("forecastWindDirection" + i, formatWindDirection(direction));
+          s("forecastWindGust" + i, (gust !== null) ? convertSpeed(gust) : "N/A");
+          s("forecastCondition" + i, data.forecastConditionText && data.forecastConditionText[i] ? data.forecastConditionText[i] : "N/A");
+          s("forecastTemp" + i, data.forecastTempC && data.forecastTempC[i] != null ? convertTemp(data.forecastTempC[i]) : "N/A");
+          s("forecastPrecip" + i, data.forecastPrecipMm && data.forecastPrecipMm[i] != null ? convertPrecip(data.forecastPrecipMm[i]) : "N/A");
+          s("forecastSnow" + i, data.forecastSnowCm && data.forecastSnowCm[i] != null ? convertSnow(data.forecastSnowCm[i]) : "N/A");
+          s("forecastHumidity" + i, data.forecastHumidity && data.forecastHumidity[i] != null ? data.forecastHumidity[i] : "N/A");
+          var fStormEl = document.getElementById("forecastStorm" + i);
+          if (fStormEl && !fStormEl.querySelector('input,select')) {
+            var isStorm = data.forecastIsThunderstorm && data.forecastIsThunderstorm[i] === "YES";
+            fStormEl.innerHTML = isStorm ? "YES" : "No";
+            fStormEl.className = isStorm ? "storm-yes" : "";
+          }
+        }
+      } else {
+        for (var i = 0; i < 3; i++) {
+          s("forecastTime" + i, "N/A");
+          s("forecastWindSpeed" + i, "N/A");
+          s("forecastWindDirection" + i, "N/A");
+          s("forecastWindGust" + i, "N/A");
+          s("forecastCondition" + i, "N/A");
+          s("forecastTemp" + i, "N/A");
+          s("forecastPrecip" + i, "N/A");
+          s("forecastSnow" + i, "N/A");
+          s("forecastHumidity" + i, "N/A");
+          s("forecastStorm" + i, "N/A");
+        }
+      }
+
+      // Weather error
+      var weatherErrorDiv = document.getElementById("weatherErrorDiv");
+      var weatherError = document.getElementById("weatherError");
+      if (data.weatherError && data.weatherError !== "") {
+        weatherError.innerHTML = "Error: " + data.weatherError;
+        weatherErrorDiv.style.display = "block";
+      } else {
+        weatherErrorDiv.style.display = "none";
+      }
+
+      // Wind safety
+      s("windStowActive", data.windStowActive);
+      s("windStowReason", data.windStowReason);
+      s("windTrackingActive", data.windTrackingActive);
+      s("emergencyStowActive", data.emergencyStowActive);
+      s("stowDirection", data.stowDirection);
+
+      // Update cached values for fast poll canvas drawing
+      cachedWindDir = data.currentWindDirection;
+      cachedWeatherValid = (data.weatherDataValid === "YES");
+      cachedEmergencyStow = data.emergencyStowActive;
+      cachedWindStowReason = data.windStowReason;
+    }
+  };
+  xhr.ontimeout = function() { infoPollInFlight = false; };
+  xhr.onerror = function() { infoPollInFlight = false; };
+  xhr.send();
+}, 2000);
 
 function nudgeSetpoint(axis, delta) {
   var currentSpan = document.getElementById("setpoint_" + axis);

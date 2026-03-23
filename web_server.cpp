@@ -786,7 +786,7 @@ void WebServerManager::setupAPIRoutes() {
 
     // Real-time status endpoint - polled frequently, no NVS reads
     server->on("/status", HTTP_GET, [this]() {
-        static DynamicJsonDocument doc(8192);
+        static DynamicJsonDocument doc(4096);
         doc.clear();
 
         // Motor and control data — use native numeric types to avoid String heap allocations
@@ -804,7 +804,6 @@ void WebServerManager::setupAPIRoutes() {
         doc["needs_unwind"] = msc.needs_unwind.load();
 
         // Status flags
-        doc["calMode"] = msc.calMode ? "ON" : "OFF";
         doc["i2cErrorFlag_az"] = (int)msc.i2cErrorFlag_az.load();
         doc["i2cErrorFlag_el"] = (int)msc.i2cErrorFlag_el.load();
         doc["faultTripped"] = (int)msc.global_fault.load();
@@ -814,27 +813,10 @@ void WebServerManager::setupAPIRoutes() {
         doc["isElMotorLatched"] = (int)msc._isElMotorLatched.load();
         doc["motorSpeedPctAz"] = msc.getMotorSpeedPctAz();
         doc["motorSpeedPctEl"] = msc.getMotorSpeedPctEl();
-        doc["serialActive"] = (int)serialManager.serialActive.load();
-
-        // Mode states (in-memory reads)
-        doc["singleMotorModeText"] = msc.singleMotorMode ? "ON" : "OFF";
-        doc["directionLockEnabled"] = msc.isDirectionLockEnabled() ? "ON" : "OFF";
-        doc["extendedElEnabled"] = msc.isExtendedElEnabled() ? "ON" : "OFF";
-        doc["stellariumConnActive"] = stellariumPoller.getStellariumConnActive() ? "Connected" : "Disconnected";
-
         // Power data
         doc["inputVoltage"] = r2(ina219Manager.getLoadVoltage());
         doc["currentDraw"] = r2(ina219Manager.getCurrent() / 1000);
         doc["rotatorPowerDraw"] = r2(ina219Manager.getPower());
-
-        // Network data
-        int rssi = wifiManager.getRSSI();
-        doc["rssi"] = rssi;
-        doc["level"] = wifiManager.getSignalStrengthLevel(rssi);
-        doc["ip_addr"] = wifiManager.ip_addr;
-        doc["rotctl_client_ip"] = rotctlWifi.getRotctlClientIP();
-        doc["bssid"] = wifiManager.getCurrentBSSID();
-        doc["wifi_channel"] = wifiManager.getCurrentWiFiChannel();
 
         // Log messages
         {
@@ -851,7 +833,45 @@ void WebServerManager::setupAPIRoutes() {
             doc["newLogMessages"] = logMsgs;
         }
         doc["currentDebugLevel"] = _logger.getDebugLevel();
+
+        if (msc.isSmoothTrackingEnabled()) {
+            doc["kalmanAzPos"] = r2(msc.getKalmanAzPos());
+            doc["kalmanElPos"] = r2(msc.getKalmanElPos());
+            doc["kalmanAzVel"] = r2(msc.getKalmanAzVel());
+            doc["kalmanElVel"] = r2(msc.getKalmanElVel());
+        }
+
+        size_t jsonLen = measureJson(doc);
+        String json;
+        json.reserve(jsonLen + 1);
+        serializeJson(doc, json);
+        server->send(200, "application/json", json);
+    });
+
+    // Slow-changing status endpoint - polled at 2s interval
+    server->on("/info", HTTP_GET, [this]() {
+        static DynamicJsonDocument doc(6144);
+        doc.clear();
+
+        // Network data
+        int rssi = wifiManager.getRSSI();
+        doc["rssi"] = rssi;
+        doc["level"] = wifiManager.getSignalStrengthLevel(rssi);
+        doc["ip_addr"] = wifiManager.ip_addr;
+        doc["rotctl_client_ip"] = rotctlWifi.getRotctlClientIP();
+        doc["bssid"] = wifiManager.getCurrentBSSID();
+        doc["wifi_channel"] = wifiManager.getCurrentWiFiChannel();
+
+        // Slow-changing status flags
+        doc["extendedElEnabled"] = msc.isExtendedElEnabled() ? "ON" : "OFF";
+        doc["stellariumConnActive"] = stellariumPoller.getStellariumConnActive() ? "Connected" : "Disconnected";
         doc["serialOutputDisabled"] = _logger.getSerialOutputDisabled();
+        doc["calMode"] = msc.calMode ? "ON" : "OFF";
+        doc["serialActive"] = (int)serialManager.serialActive.load();
+        doc["singleMotorModeText"] = msc.singleMotorMode ? "ON" : "OFF";
+        doc["directionLockEnabled"] = msc.isDirectionLockEnabled() ? "ON" : "OFF";
+        doc["safeMode"] = msc.isSafeMode() ? "ON" : "OFF";
+        doc["smoothTrackingActive"] = msc.isSmoothTrackingEnabled() ? "ON" : "OFF";
 
         // Weather data (in-memory via mutex)
         WeatherData weatherData = weatherPoller.getWeatherData();
@@ -909,16 +929,7 @@ void WebServerManager::setupAPIRoutes() {
         doc["windStowReason"] = windStowState.reason;
         doc["stowDirection"] = r1(windSafetyData.currentStowDirection);
         doc["windTrackingActive"] = msc.isWindTrackingActive() ? "YES" : "NO";
-        doc["windTrackingStatus"] = msc.getWindTrackingStatus();
         doc["emergencyStowActive"] = windSafetyData.emergencyStowActive ? "YES" : "NO";
-        doc["safeMode"] = msc.isSafeMode() ? "ON" : "OFF";
-        doc["smoothTrackingActive"] = msc.isSmoothTrackingEnabled() ? "ON" : "OFF";
-        if (msc.isSmoothTrackingEnabled()) {
-            doc["kalmanAzPos"] = r2(msc.getKalmanAzPos());
-            doc["kalmanElPos"] = r2(msc.getKalmanElPos());
-            doc["kalmanAzVel"] = r2(msc.getKalmanAzVel());
-            doc["kalmanElVel"] = r2(msc.getKalmanElVel());
-        }
 
         size_t jsonLen = measureJson(doc);
         String json;
@@ -975,6 +986,10 @@ void WebServerManager::setupAPIRoutes() {
         doc["D_az"] = r2(msc.getDAz());
         doc["azOffset"] = r3(msc.getAzOffset());
         doc["elOffset"] = r3(msc.getElOffset());
+        doc["singleMotorModeText"] = msc.singleMotorMode ? "ON" : "OFF";
+        doc["directionLockEnabled"] = msc.isDirectionLockEnabled() ? "ON" : "OFF";
+        doc["safeMode"] = msc.isSafeMode() ? "ON" : "OFF";
+        doc["smoothTrackingActive"] = msc.isSmoothTrackingEnabled() ? "ON" : "OFF";
         doc["autoHomeEnabled"] = msc.isAutoHomeEnabled() ? "ON" : "OFF";
         doc["autoHomeMins"] = msc.getAutoHomeTimeout();
         doc["smoothTrackingEnabled"] = msc.isSmoothTrackingEnabled() ? "ON" : "OFF";
