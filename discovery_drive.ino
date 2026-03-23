@@ -119,7 +119,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     HandleWebRequests
     ,  "Web Server Task"
-    ,  20480  // Stack size may need adjustment
+    ,  16384  // Reduced from 20KB — static JSON docs keep heap usage bounded
     ,  NULL
     ,  1  // Priority (lower than LWIP tasks)
     ,  NULL

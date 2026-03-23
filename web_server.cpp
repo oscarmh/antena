@@ -786,7 +786,7 @@ void WebServerManager::setupAPIRoutes() {
 
     // Real-time status endpoint - polled frequently, no NVS reads
     server->on("/status", HTTP_GET, [this]() {
-        static DynamicJsonDocument doc(10240);
+        static DynamicJsonDocument doc(8192);
         doc.clear();
 
         // Motor and control data — use native numeric types to avoid String heap allocations
@@ -929,7 +929,7 @@ void WebServerManager::setupAPIRoutes() {
 
     // Configuration endpoint - fetched once on page load and after settings changes
     server->on("/config", HTTP_GET, [this]() {
-        static DynamicJsonDocument doc(8192);
+        static DynamicJsonDocument doc(6144);
         doc.clear();
 
         // Network configuration (NVS reads)

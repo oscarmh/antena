@@ -24,6 +24,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <StreamString.h>
 #include <atomic>
 
 // Custom includes
@@ -147,14 +148,17 @@ private:
     std::atomic<bool> _windBasedHomeEnabled{false};
     
     // Timing constants
-    static constexpr unsigned long POLL_INTERVAL_MS = 300000; // 5 minutes
-    static constexpr unsigned long RETRY_INTERVAL_MS = 60000; // 60 seconds on error
-    static constexpr unsigned long HTTP_TIMEOUT_MS = 15000;    // 15 seconds
-    
+    static constexpr unsigned long POLL_INTERVAL_MS = 300000;       // 5 minutes
+    static constexpr unsigned long RETRY_INTERVAL_MS = 60000;       // 60 seconds on error
+    static constexpr unsigned long HTTP_CONNECT_TIMEOUT_MS = 15000; // 15s for TCP+TLS handshake
+    static constexpr unsigned long HTTP_READ_TIMEOUT_MS = 30000;    // 30s for data transfer
+    static constexpr unsigned long TRUNCATION_RETRY_MS = 10000;     // 10s retry after truncation
+
     // State variables
     std::atomic<unsigned long> _lastPollTime{0};
     std::atomic<unsigned long> _lastSuccessTime{0};
     std::atomic<bool> _forceUpdate{false};
+    std::atomic<bool> _lastPollWasTruncation{false};
     
     // Thread synchronization
     SemaphoreHandle_t _weatherDataMutex = NULL;
@@ -164,6 +168,11 @@ private:
     // Weather data storage
     WeatherData _weatherData;
     WindSafetyData _windSafetyData;
+
+    // Persistent TLS client — survives between polls so the TLS session
+    // cache is reused.  First connection: full handshake (~1-2s).
+    // Subsequent connections: session resumption (~100ms).
+    WiFiClientSecure _tlsClient;
 
     // Core functionality helpers
     bool shouldPollWeather();

@@ -145,8 +145,9 @@ bool WeatherPoller::shouldPollWeather() {
         return true;
     }
     
-    // Retry on error after shorter interval
-    if (timeSinceLastSuccess >= POLL_INTERVAL_MS && timeSinceLastPoll >= RETRY_INTERVAL_MS) {
+    // Retry on error after shorter interval (even shorter after truncation)
+    unsigned long retryInterval = _lastPollWasTruncation.load() ? TRUNCATION_RETRY_MS : RETRY_INTERVAL_MS;
+    if (timeSinceLastSuccess >= POLL_INTERVAL_MS && timeSinceLastPoll >= retryInterval) {
         return true;
     }
     
@@ -159,79 +160,89 @@ bool WeatherPoller::pollWeatherData() {
         setErrorState("Failed to build API URL");
         return false;
     }
-    
+
     _logger.debug("Polling weather API: " + apiUrl);
-    
-    // Fetch response as string, then free TLS before parsing.
-    // This sequences memory: peak = max(TLS+string, doc) ≈ 20KB
-    // instead of TLS+doc concurrent ≈ 32KB with streaming.
+
+    // Use persistent _tlsClient so TLS session cache survives between polls.
+    // First poll: full TLS handshake (~1-2s).  Subsequent: session resumption
+    // (~100ms), dramatically reducing the blocking window on the calling core.
     bool success = false;
-    String response;
-    int httpResponseCode;
-    {
-        HTTPClient http;
-        if (!http.begin(apiUrl)) {
-            setErrorState("HTTP begin failed");
-            return false;
-        } 
 
-        http.setConnectTimeout(HTTP_TIMEOUT_MS);
-        http.setTimeout(HTTP_TIMEOUT_MS);
+    _tlsClient.setInsecure();  // WeatherAPI.com — no cert pinning needed
+    _tlsClient.setTimeout(HTTP_READ_TIMEOUT_MS / 1000);  // Socket timeout in seconds
 
-        httpResponseCode = http.GET();
+    HTTPClient http;
+    http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
+    http.setTimeout(HTTP_READ_TIMEOUT_MS);
 
-        if (httpResponseCode == 200) {
-            response = http.getString();
-        }
-
-        http.end();  // Frees TLS buffers before JSON parsing
+    if (!http.begin(_tlsClient, apiUrl)) {
+        setErrorState("HTTP begin failed");
+        return false;
     }
+
+    int httpResponseCode = http.GET();
+
+    // Pre-allocate response buffer to avoid String doubling.
+    // String doubling at 32K→64K needs 96KB temporarily — more than
+    // the ~35-40KB free during an active TLS connection.
+    // Pre-reserving avoids reallocation entirely if the response fits.
+    StreamString response;
+    if (httpResponseCode == 200) {
+        int contentLength = http.getSize();  // -1 if chunked
+        size_t reserveSize = (contentLength > 0) ? (size_t)contentLength + 1 : 12288;  // 12KB default — typical response is ~10KB
+        if (!response.reserve(reserveSize)) {
+            _logger.warn("Could not reserve " + String(reserveSize) + " bytes (free heap: " + String(ESP.getFreeHeap()) + ")");
+            // Fall through — writeToStream will still work via incremental growth
+        }
+        http.writeToStream(&response);
+        _logger.debug("Weather API response length: " + String(response.length()));
+    }
+
+    http.end();
 
     if (httpResponseCode == 200) {
         if (response.length() == 0) {
+            _lastPollWasTruncation = true;
             setErrorState("Empty response from API");
             return false;
         }
 
-        // Filter: only deserialize the fields we actually use
-        StaticJsonDocument<384> filter;
-        filter["error"]["message"] = true;
-        filter["current"] = true;
-        JsonObject forecastHourFilter = filter["forecast"]["forecastday"][0]["hour"][0].to<JsonObject>();
-        forecastHourFilter["time"] = true;
-        forecastHourFilter["wind_kph"] = true;
-        forecastHourFilter["wind_degree"] = true;
-        forecastHourFilter["gust_kph"] = true;
-        forecastHourFilter["temp_c"] = true;
-        forecastHourFilter["precip_mm"] = true;
-        forecastHourFilter["snow_cm"] = true;
-        forecastHourFilter["humidity"] = true;
-        forecastHourFilter["condition"]["text"] = true;
-        forecastHourFilter["condition"]["code"] = true;
-
-        DynamicJsonDocument doc(12288);
-        DeserializationError error = deserializeJson(doc, response,
-                                                     DeserializationOption::Filter(filter));
-        response = "";  // Free response string before processing
+        // No client-side filter needed — WeatherAPI is configured to send
+        // only the fields we use (aqi=no, alerts=no, days=2).
+        DynamicJsonDocument doc(8192);
+        DeserializationError error = deserializeJson(doc, response.c_str());
+        response.clear();  // Free response buffer before processing
 
         if (error) {
-            setErrorState("JSON parse error: " + String(error.c_str()));
-        } else if (doc.containsKey("error")) {
-            String apiError = doc["error"]["message"].as<String>();
-            setErrorState("API error: " + apiError);
-        } else {
-            bool currentOk = extractCurrentWeather(doc);
-            bool forecastOk = extractForecastWeather(doc);
-
-            if (currentOk || forecastOk) {
-                if (_weatherDataMutex != NULL && xSemaphoreTake(_weatherDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                    _weatherData.dataValid = true;
-                    _weatherData.errorMessage = "";
-                    xSemaphoreGive(_weatherDataMutex);
-                }
-                success = true;
+            if (error == DeserializationError::IncompleteInput ||
+                error == DeserializationError::EmptyInput) {
+                _lastPollWasTruncation = true;
+                setErrorState("JSON parse error: " + String(error.c_str()) +
+                              " (truncated response)");
             } else {
-                setErrorState("Failed to extract weather data");
+                _lastPollWasTruncation = false;
+                setErrorState("JSON parse error: " + String(error.c_str()));
+            }
+        } else {
+            _lastPollWasTruncation = false;
+
+            if (doc.containsKey("error")) {
+                String apiError = doc["error"]["message"].as<String>();
+                setErrorState("API error: " + apiError);
+            } else {
+                bool currentOk = extractCurrentWeather(doc);
+                bool forecastOk = extractForecastWeather(doc);
+
+                if (currentOk || forecastOk) {
+                    if (_weatherDataMutex != NULL && xSemaphoreTake(_weatherDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                        _weatherData.dataValid = true;
+                        _weatherData.errorMessage = "";
+                        xSemaphoreGive(_weatherDataMutex);
+                    }
+                    success = true;
+                } else {
+                    setErrorState("Failed to extract weather data");
+                }
             }
         }
     } else if (httpResponseCode == 401) {
@@ -247,7 +258,7 @@ bool WeatherPoller::pollWeatherData() {
         setErrorState("Network error: " + String(httpResponseCode));
         _logger.error("WeatherAPI network error: " + String(httpResponseCode));
     }
-    
+
     return success;
 }
 
