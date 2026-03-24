@@ -841,9 +841,9 @@ void WebServerManager::setupAPIRoutes() {
             doc["kalmanElVel"] = r2(msc.getKalmanElVel());
         }
 
-        size_t jsonLen = measureJson(doc);
-        String json;
-        json.reserve(jsonLen + 1);
+        static String json;
+        json = "";                             // keep buffer, reset length
+        json.reserve(measureJson(doc) + 1);    // no-op once buffer is large enough
         serializeJson(doc, json);
         server->send(200, "application/json", json);
     });
@@ -931,9 +931,9 @@ void WebServerManager::setupAPIRoutes() {
         doc["windTrackingActive"] = msc.isWindTrackingActive() ? "YES" : "NO";
         doc["emergencyStowActive"] = windSafetyData.emergencyStowActive ? "YES" : "NO";
 
-        size_t jsonLen = measureJson(doc);
-        String json;
-        json.reserve(jsonLen + 1);
+        static String json;
+        json = "";                             // keep buffer, reset length
+        json.reserve(measureJson(doc) + 1);    // no-op once buffer is large enough
         serializeJson(doc, json);
         server->send(200, "application/json", json);
     });
@@ -1017,9 +1017,9 @@ void WebServerManager::setupAPIRoutes() {
         doc["windSpeedThreshold"] = r1(weatherPoller.getWindSpeedThreshold());
         doc["windGustThreshold"] = r1(weatherPoller.getWindGustThreshold());
 
-        size_t jsonLen = measureJson(doc);
-        String json;
-        json.reserve(jsonLen + 1);
+        static String json;
+        json = "";                             // keep buffer, reset length
+        json.reserve(measureJson(doc) + 1);    // no-op once buffer is large enough
         serializeJson(doc, json);
         server->send(200, "application/json", json);
     });

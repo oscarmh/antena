@@ -182,17 +182,15 @@ bool WeatherPoller::pollWeatherData() {
 
     int httpResponseCode = http.GET();
 
-    // Pre-allocate response buffer to avoid String doubling.
-    // String doubling at 32K→64K needs 96KB temporarily — more than
-    // the ~35-40KB free during an active TLS connection.
-    // Pre-reserving avoids reallocation entirely if the response fits.
-    StreamString response;
+    // Static response buffer — allocated once, reused across polls.
+    // Avoids repeated 12KB alloc/free that fragments heap during active TLS.
+    static StreamString response;
+    response.clear();                           // keep buffer, reset length
     if (httpResponseCode == 200) {
-        int contentLength = http.getSize();  // -1 if chunked
-        size_t reserveSize = (contentLength > 0) ? (size_t)contentLength + 1 : 12288;  // 12KB default — typical response is ~10KB
+        int contentLength = http.getSize();    // -1 if chunked
+        size_t reserveSize = (contentLength > 0) ? (size_t)contentLength + 1 : 12288;
         if (!response.reserve(reserveSize)) {
             _logger.warn("Could not reserve " + String(reserveSize) + " bytes (free heap: " + String(ESP.getFreeHeap()) + ")");
-            // Fall through — writeToStream will still work via incremental growth
         }
         http.writeToStream(&response);
         _logger.debug("Weather API response length: " + String(response.length()));
