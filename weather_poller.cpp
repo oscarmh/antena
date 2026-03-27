@@ -168,6 +168,12 @@ bool WeatherPoller::pollWeatherData() {
     // (~100ms), dramatically reducing the blocking window on the calling core.
     bool success = false;
 
+    // Clean up any stale connection before starting a new one.
+    // At 5-minute polling intervals the server's keepalive (~60-120s) will have
+    // closed the connection anyway, so the persistent TLS session is already dead.
+    // Stopping first frees the old SSL context and avoids leaking heap.
+    _tlsClient.stop();
+
     _tlsClient.setInsecure();  // WeatherAPI.com — no cert pinning needed
     _tlsClient.setTimeout(HTTP_READ_TIMEOUT_MS / 1000);  // Socket timeout in seconds
 
