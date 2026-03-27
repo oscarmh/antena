@@ -83,4 +83,11 @@ private:
     String getLevelString(LogLevel level);
 };
 
+// Helper to safely copy strings into fixed-size char buffers
+static inline void safeCopy(char* dst, const char* src, size_t dstSize) {
+    if (dstSize == 0) return;
+    strncpy(dst, src ? src : "", dstSize - 1);
+    dst[dstSize - 1] = '\0';
+}
+
 #endif // LOGGER_H

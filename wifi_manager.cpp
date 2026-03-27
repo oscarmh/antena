@@ -31,7 +31,7 @@ WiFiManager::WiFiManager(Preferences& prefs, Logger& logger) : _preferences(pref
 
 // Core functionality methods
 void WiFiManager::begin() {
-    _hostname = _preferences.getString("hostname", "discoverydrive");
+    safeCopy(_hostname, _preferences.getString("hostname", "discoverydrive").c_str(), sizeof(_hostname));
     _httpPort = _preferences.getInt("http_port", 80);
 
     if (_preferences.getBool("wifiDisabled", false)) {
@@ -44,8 +44,8 @@ void WiFiManager::begin() {
 }
 
 void WiFiManager::connectToWiFi() {
-    wifi_ssid = _preferences.getString("wifi_ssid", "");
-    wifi_password = _preferences.getString("wifi_password", "");
+    safeCopy(wifi_ssid, _preferences.getString("wifi_ssid", "").c_str(), sizeof(wifi_ssid));
+    safeCopy(wifi_password, _preferences.getString("wifi_password", "").c_str(), sizeof(wifi_password));
 
     // Initialize ESP-IDF networking stack
     ESP_ERROR_CHECK(esp_netif_init());
@@ -72,7 +72,7 @@ void WiFiManager::connectToWiFi() {
                                                         NULL,
                                                         &instance_got_ip));
 
-    if (wifi_ssid != "" && wifi_password != "") {
+    if (wifi_ssid[0] != '\0' && wifi_password[0] != '\0') {
         _logger.info("Connecting to Wi-Fi...");
 
         // Configure WiFi station mode
@@ -89,8 +89,8 @@ void WiFiManager::connectToWiFi() {
         wifi_config.sta.pmf_cfg.required = false;
         
         // Network credentials
-        strcpy((char*)wifi_config.sta.ssid, wifi_ssid.c_str());
-        strcpy((char*)wifi_config.sta.password, wifi_password.c_str());
+        strcpy((char*)wifi_config.sta.ssid, wifi_ssid);
+        strcpy((char*)wifi_config.sta.password, wifi_password);
         
         // Roaming and scanning configuration
         wifi_config.sta.bssid_set = 0;
@@ -147,32 +147,34 @@ void WiFiManager::startAPMode() {
     // Get and store IP address
     esp_netif_ip_info_t ip_info;
     esp_netif_get_ip_info(ap_netif, &ip_info);
-    ip_addr = IPAddress(ip_info.ip.addr).toString();
-    
+    safeCopy(ip_addr, IPAddress(ip_info.ip.addr).toString().c_str(), sizeof(ip_addr));
+
     _logger.info("AP IP address: " + String(ip_addr));
 }
 
 // Status and information methods
-String WiFiManager::getCurrentBSSID() {
+const char* WiFiManager::getCurrentBSSID() {
+    static char bssid_str[18];
     wifi_ap_record_t ap_info;
     esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
-    
+
     if (err == ESP_OK) {
-        char bssid_str[18];
-        sprintf(bssid_str, "%02X:%02X:%02X:%02X:%02X:%02X", 
-                ap_info.bssid[0], ap_info.bssid[1], ap_info.bssid[2], 
+        sprintf(bssid_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                ap_info.bssid[0], ap_info.bssid[1], ap_info.bssid[2],
                 ap_info.bssid[3], ap_info.bssid[4], ap_info.bssid[5]);
         return bssid_str;
     }
     return "Not connected";
 }
 
-String WiFiManager::getCurrentWiFiChannel() {
+const char* WiFiManager::getCurrentWiFiChannel() {
+    static char channel_str[4];
     wifi_ap_record_t ap_info;
     esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
-    
+
     if (err == ESP_OK) {
-        return String(ap_info.primary);
+        snprintf(channel_str, sizeof(channel_str), "%d", ap_info.primary);
+        return channel_str;
     }
     return "N/A";
 }
@@ -221,7 +223,7 @@ int WiFiManager::getSignalStrengthLevel(int32_t rssi) {
     return 0;                       // No signal
 }
 
-String WiFiManager::getHostname() {
+const char* WiFiManager::getHostname() {
     return _hostname;
 }
 
@@ -328,13 +330,13 @@ void WiFiManager::wifi_event_handler(void* arg, esp_event_base_t event_base, int
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
         inst->_logger.info("Got IP: " + IPAddress(event->ip_info.ip.addr).toString());
 
-        inst->ip_addr = IPAddress(event->ip_info.ip.addr).toString();
+        safeCopy(inst->ip_addr, IPAddress(event->ip_info.ip.addr).toString().c_str(), sizeof(inst->ip_addr));
         inst->wifiConnected = true;
 
         // (Re)start mDNS every time we get an IP
         MDNS.end();
         if (MDNS.begin(inst->_hostname)) {
-            inst->_logger.info("mDNS responder started: http://" + inst->_hostname + ".local");
+            inst->_logger.info("mDNS responder started: http://" + String(inst->_hostname) + ".local");
             MDNS.addService("http", "tcp", inst->_httpPort);
         } else {
             inst->_logger.error("mDNS failed to start");

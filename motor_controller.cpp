@@ -637,19 +637,19 @@ WindTrackingState MotorSensorController::getWindTrackingState() {
     WindTrackingState state;
     state.active = _windTrackingActive.load();
     state.lastDirection = _lastWindTrackingDirection;
-    
+
     WeatherPoller* wp = _weatherPoller;  // Local copy
-    
+
     if (!state.active) {
-        state.status = "Inactive";
+        safeCopy(state.status, "Inactive", sizeof(state.status));
     } else if (wp == nullptr || !wp->isDataValid()) {
-        state.status = "Active (No weather data)";
+        safeCopy(state.status, "Active (No weather data)", sizeof(state.status));
     } else {
         WeatherData weatherData = wp->getWeatherData();
-        state.status = "Active - Wind: " + String(weatherData.currentWindDirection, 1) + 
-                      "°, Target: " + String(state.lastDirection, 1) + "°";
+        snprintf(state.status, sizeof(state.status), "Active - Wind: %.1f°, Target: %.1f°",
+                 weatherData.currentWindDirection, state.lastDirection);
     }
-    
+
     return state;
 }
 
@@ -759,8 +759,11 @@ bool MotorSensorController::isWindTrackingActive() {
     return _windTrackingActive.load();
 }
 
-String MotorSensorController::getWindTrackingStatus() {
-    return getWindTrackingState().status;
+const char* MotorSensorController::getWindTrackingStatus() {
+    static char buf[64];
+    WindTrackingState state = getWindTrackingState();
+    safeCopy(buf, state.status, sizeof(buf));
+    return buf;
 }
 
 void MotorSensorController::setDirectionLockEnabled(bool enabled) {
@@ -1859,7 +1862,7 @@ void MotorSensorController::activateCalMode(bool on) {
         } else {
             calMode = false;
             _calRunTime = 0;  // Also clear any pending cal movement
-            _calAxis = "";
+            _calAxis[0] = '\0';
 
             // Reset motor latches and PID state so motors resume moving to setpoint
             _isAzMotorLatched = false;
@@ -1879,15 +1882,15 @@ void MotorSensorController::activateCalMode(bool on) {
     }
 }
 
-void MotorSensorController::calMoveMotor(const String& runTimeStr, const String& axis) {
+void MotorSensorController::calMoveMotor(const char* runTimeStr, const char* axis) {
     if (_calMutex != NULL && xSemaphoreTake(_calMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (!calMode) {
             xSemaphoreGive(_calMutex);
             Serial.println("Calibration mode OFF; ignoring calMove request.");
             return;
         }
-        _calRunTime = runTimeStr.toInt();
-        _calAxis = axis;
+        _calRunTime = atoi(runTimeStr);
+        safeCopy(_calAxis, axis, sizeof(_calAxis));
         xSemaphoreGive(_calMutex);
     }
 }
@@ -1902,7 +1905,7 @@ void MotorSensorController::calibrate_elevation() {
 
 void MotorSensorController::handleCalibrationMode() {
     int calRunTime = 0;
-    String calAxis = "";
+    char calAxis[4] = "";
     int calState = 0;
     unsigned long calMoveStartTime = 0;
 
@@ -1910,12 +1913,12 @@ void MotorSensorController::handleCalibrationMode() {
     // in the same acquisition to avoid a second mutex take per cycle
     if (_calMutex != NULL && xSemaphoreTake(_calMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         calRunTime = _calRunTime;
-        calAxis = _calAxis;
+        safeCopy(calAxis, _calAxis, sizeof(calAxis));
         calState = _calState;
         calMoveStartTime = _calMoveStartTime;
 
         // If state 0 with pending move, transition to state 1 immediately
-        if (calState == 0 && abs(calRunTime) > 0 && calAxis != "") {
+        if (calState == 0 && abs(calRunTime) > 0 && calAxis[0] != '\0') {
             _calMoveStartTime = millis();
             _calState = 1;
             calState = 1;
@@ -1925,7 +1928,7 @@ void MotorSensorController::handleCalibrationMode() {
     }
 
     if (calState == 0) {
-        if (abs(calRunTime) == 0 || calAxis == "") {
+        if (abs(calRunTime) == 0 || calAxis[0] == '\0') {
             analogWrite(_pwm_pin_az, 255);
             analogWrite(_pwm_pin_el, 255);
             digitalWrite(_pwm_pin_az, 1);
@@ -1935,19 +1938,19 @@ void MotorSensorController::handleCalibrationMode() {
         int directionPin, pwmPin;
         bool invert = false;
 
-        if (calAxis.equalsIgnoreCase("AZ")) {
+        if (strcasecmp(calAxis, "AZ") == 0) {
             directionPin = _ccw_pin_az;
             pwmPin = _pwm_pin_az;
             invert = _azCfg.invertDir;
-        } else if (calAxis.equalsIgnoreCase("EL")) {
+        } else if (strcasecmp(calAxis, "EL") == 0) {
             directionPin = _ccw_pin_el;
             pwmPin = _pwm_pin_el;
             invert = _elCfg.invertDir;
         } else {
-            _logger.error("Invalid calibration axis: " + calAxis);
+            _logger.error("Invalid calibration axis: " + String(calAxis));
             if (_calMutex != NULL && xSemaphoreTake(_calMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                 _calRunTime = 0;
-                _calAxis = "";
+                _calAxis[0] = '\0';
                 _calState = 0;
                 xSemaphoreGive(_calMutex);
             }
@@ -1964,7 +1967,7 @@ void MotorSensorController::handleCalibrationMode() {
 
             if (_calMutex != NULL && xSemaphoreTake(_calMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                 _calRunTime = 0;
-                _calAxis = "";
+                _calAxis[0] = '\0';
                 _calState = 0;
                 xSemaphoreGive(_calMutex);
             }

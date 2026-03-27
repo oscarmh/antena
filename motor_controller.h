@@ -40,7 +40,7 @@ struct WindStowState {
 
 struct WindTrackingState {
     bool active = false;
-    String status = "Inactive";  // Default value
+    char status[64] = "Inactive";
     float lastDirection = 0.0f;
 };
 
@@ -127,7 +127,7 @@ public:
 
     // Calibration and special functions
     void activateCalMode(bool on);
-    void calMoveMotor(const String& runTimeStr, const String& axis);
+    void calMoveMotor(const char* runTimeStr, const char* axis);
     void calibrate_elevation();
     void playOdeToJoy();
 
@@ -140,7 +140,7 @@ public:
     // Wind tracking methods
     WindTrackingState getWindTrackingState();
     bool isWindTrackingActive();
-    String getWindTrackingStatus();
+    const char* getWindTrackingStatus();
 
     // Motor stop
     void forceStopMs(unsigned long ms);
@@ -453,7 +453,7 @@ private:
 
     // Calibration state
     std::atomic<int> _calRunTime{0};
-    String _calAxis = "";
+    char _calAxis[4] = "";
     int _calState = 0;
     unsigned long _calMoveStartTime = 0;
 

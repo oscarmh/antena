@@ -40,10 +40,10 @@ WebServerManager::WebServerManager(Preferences& prefs, MotorSensorController& mo
 void WebServerManager::begin() {
     server = new WebServer(preferences.getInt("http_port", 80));
 
-    wifi_ssid = preferences.getString("wifi_ssid", "");
-    wifi_password = preferences.getString("wifi_password", "");
-    _loginUser = preferences.getString("loginUser", "");
-    _loginPassword = preferences.getString("loginPassword", "");
+    safeCopy(wifi_ssid, preferences.getString("wifi_ssid", "").c_str(), sizeof(wifi_ssid));
+    safeCopy(wifi_password, preferences.getString("wifi_password", "").c_str(), sizeof(wifi_password));
+    safeCopy(_loginUser, preferences.getString("loginUser", "").c_str(), sizeof(_loginUser));
+    safeCopy(_loginPassword, preferences.getString("loginPassword", "").c_str(), sizeof(_loginPassword));
 
     setupRoutes();
 
@@ -103,11 +103,11 @@ void WebServerManager::setupStaticRoutes() {
 void WebServerManager::setupMainPageRoutes() {
     // Main page route with authentication
     server->on("/", HTTP_GET, [this]() {
-        String loginUser = getLoginUser();
-        String loginPassword = getLoginPassword();
+        const char* loginUser = getLoginUser();
+        const char* loginPassword = getLoginPassword();
 
-        if (_loginRequired && loginUser.length() != 0 && loginPassword.length() != 0) {
-            if (!server->authenticate(loginUser.c_str(), loginPassword.c_str())) {
+        if (_loginRequired && loginUser[0] != '\0' && loginPassword[0] != '\0') {
+            if (!server->authenticate(loginUser, loginPassword)) {
                 return server->requestAuthentication();
             }
         }
@@ -257,7 +257,7 @@ void WebServerManager::setupMotorControlRoutes() {
         if (server->hasArg("value")) {
             if (msc.calMode) {
                 String value = server->arg("value");
-                msc.calMoveMotor(value, "AZ");
+                msc.calMoveMotor(value.c_str(), "AZ");
                 server->send(200, "text/plain", "Azimuth moved to: " + value);
             } else {
                 server->send(200, "text/plain", "Cal Mode OFF");
@@ -271,7 +271,7 @@ void WebServerManager::setupMotorControlRoutes() {
         if (server->hasArg("value")) {
             if (msc.calMode) {
                 String value = server->arg("value");
-                msc.calMoveMotor(value, "EL");
+                msc.calMoveMotor(value.c_str(), "EL");
                 server->send(200, "text/plain", "Elevation moved to: " + value);
             } else {
                 server->send(200, "text/plain", "Cal Mode OFF");
@@ -347,13 +347,13 @@ void WebServerManager::setupConfigurationRoutes() {
     server->on("/setPassword", HTTP_POST, [this]() {
         if (server->hasArg("loginUser")) {
             String loginUser = server->arg("loginUser");
-            setLoginUser(loginUser);
+            setLoginUser(loginUser.c_str());
             preferences.putString("loginUser", loginUser);
         }
 
         if (server->hasArg("loginPassword")) {
             String loginPassword = server->arg("loginPassword");
-            setLoginPassword(loginPassword);
+            setLoginPassword(loginPassword.c_str());
             preferences.putString("loginPassword", loginPassword);
         }
 
@@ -364,14 +364,14 @@ void WebServerManager::setupConfigurationRoutes() {
         bool hotspotMode = server->hasArg("hotspot");
 
         if (hotspotMode) {
-            wifi_ssid = "";
-            wifi_password = "";
+            wifi_ssid[0] = '\0';
+            wifi_password[0] = '\0';
         } else if (server->hasArg("ssid") && server->hasArg("password")) {
-            wifi_ssid = server->arg("ssid");
-            wifi_password = server->arg("password");
+            safeCopy(wifi_ssid, server->arg("ssid").c_str(), sizeof(wifi_ssid));
+            safeCopy(wifi_password, server->arg("password").c_str(), sizeof(wifi_password));
         }
 
-        if ((wifi_ssid.length() != 0 && wifi_password.length() != 0) || hotspotMode) {
+        if ((wifi_ssid[0] != '\0' && wifi_password[0] != '\0') || hotspotMode) {
             preferences.putString("wifi_ssid", wifi_ssid);
             preferences.putString("wifi_password", wifi_password);
             String htmlResponse = createRestartResponse("WiFi Credentials Updated!", "WiFi Credentials Updated! Restarting...");
@@ -1085,7 +1085,7 @@ void WebServerManager::setupFirmwareUploadRoute() {
                 html += "button{background:#4CAF50;color:white;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;font-size:16px;margin:10px;}";
                 html += "button:hover{background:#45a049;}</style></head><body>";
                 html += "<h1>Firmware Update Failed</h1>";
-                html += "<div class='error'>" + _firmwareUpdateError + "</div>";
+                html += "<div class='error'>" + String(_firmwareUpdateError) + "</div>";
                 html += "<button onclick=\"window.location.href='/ota'\">Try Again</button>";
                 html += "<button onclick=\"window.location.href='/'\">Back to Main</button>";
                 html += "</body></html>";
@@ -1104,11 +1104,11 @@ void WebServerManager::setupFirmwareUploadRoute() {
 // =============================================================================
 
 void WebServerManager::handleOTAUpload() {
-    String loginUser = getLoginUser();
-    String loginPassword = getLoginPassword();
+    const char* loginUser = getLoginUser();
+    const char* loginPassword = getLoginPassword();
 
-    if (_loginRequired && loginUser.length() != 0 && loginPassword.length() != 0) {
-        if (!server->authenticate(loginUser.c_str(), loginPassword.c_str())) {
+    if (_loginRequired && loginUser[0] != '\0' && loginPassword[0] != '\0') {
+        if (!server->authenticate(loginUser, loginPassword)) {
             return server->requestAuthentication();
         }
     }
@@ -1307,24 +1307,24 @@ void WebServerManager::handleFirmwareUpload() {
         _logger.info("Starting firmware upload: " + upload.filename);
 
         _firmwareUpdateSuccess = false;
-        _firmwareUpdateError = "";
+        _firmwareUpdateError[0] = '\0';
         updateStarted = false;
         totalSize = 0;
 
         if (upload.filename != "discovery_drive.ino.bin") {
             _logger.error("Invalid firmware filename: " + upload.filename);
-            _firmwareUpdateError = "Invalid filename. Please upload discovery_drive.ino.bin";
+            safeCopy(_firmwareUpdateError, "Invalid filename. Please upload discovery_drive.ino.bin", sizeof(_firmwareUpdateError));
             return;
         }
 
     } else if (upload.status == UPLOAD_FILE_WRITE) {
         // Skip writing if we already have an error
-        if (_firmwareUpdateError.length() > 0) return;
+        if (_firmwareUpdateError[0] != '\0') return;
 
         // Check size limit
         if (totalSize + upload.currentSize > MAX_FIRMWARE_SIZE) {
             _logger.error("Firmware too large - " + String(totalSize + upload.currentSize) + " bytes exceeds " + String(MAX_FIRMWARE_SIZE) + " byte limit");
-            _firmwareUpdateError = "Firmware file too large. Maximum size is 3MB.";
+            safeCopy(_firmwareUpdateError, "Firmware file too large. Maximum size is 3MB.", sizeof(_firmwareUpdateError));
             if (updateStarted) {
                 Update.abort();
                 updateStarted = false;
@@ -1336,7 +1336,7 @@ void WebServerManager::handleFirmwareUpload() {
             _logger.debug("Starting firmware update");
             if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                 _logger.error("Cannot start firmware update");
-                _firmwareUpdateError = "Cannot start firmware update. Not enough space or flash error.";
+                safeCopy(_firmwareUpdateError, "Cannot start firmware update. Not enough space or flash error.", sizeof(_firmwareUpdateError));
                 return;
             }
             updateStarted = true;
@@ -1344,7 +1344,7 @@ void WebServerManager::handleFirmwareUpload() {
 
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
             _logger.error("Firmware write failed");
-            _firmwareUpdateError = "Firmware write failed during upload.";
+            safeCopy(_firmwareUpdateError, "Firmware write failed during upload.", sizeof(_firmwareUpdateError));
             Update.abort();
             updateStarted = false;
             return;
@@ -1360,16 +1360,16 @@ void WebServerManager::handleFirmwareUpload() {
                 _firmwareUpdateSuccess = true;
             } else {
                 _logger.error("Firmware update finalization failed");
-                _firmwareUpdateError = "Firmware update failed during finalization. Current firmware unchanged.";
+                safeCopy(_firmwareUpdateError, "Firmware update failed during finalization. Current firmware unchanged.", sizeof(_firmwareUpdateError));
             }
-        } else if (_firmwareUpdateError.length() == 0) {
-            _firmwareUpdateError = "Firmware update was not started. Upload may have been invalid.";
+        } else if (_firmwareUpdateError[0] == '\0') {
+            safeCopy(_firmwareUpdateError, "Firmware update was not started. Upload may have been invalid.", sizeof(_firmwareUpdateError));
         }
         updateStarted = false;
 
     } else if (upload.status == UPLOAD_FILE_ABORTED) {
         _logger.debug("Firmware upload aborted");
-        _firmwareUpdateError = "Firmware upload was aborted.";
+        safeCopy(_firmwareUpdateError, "Firmware upload was aborted.", sizeof(_firmwareUpdateError));
         if (updateStarted) {
             Update.abort();
             updateStarted = false;
@@ -1709,34 +1709,35 @@ String WebServerManager::generateProgressBarHTML() {
 // AUTHENTICATION METHODS
 // =============================================================================
 
-String WebServerManager::getLoginUser() {
-    String result = "";
+const char* WebServerManager::getLoginUser() {
+    // Returns pointer to internal buffer — only called from web server task (single-threaded access)
+    static char buf[33];
     if (_loginUserMutex != NULL && xSemaphoreTake(_loginUserMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        result = _loginUser;
+        safeCopy(buf, _loginUser, sizeof(buf));
         xSemaphoreGive(_loginUserMutex);
     }
-    return result;
+    return buf;
 }
 
-void WebServerManager::setLoginUser(String loginUser) {
+void WebServerManager::setLoginUser(const char* loginUser) {
     if (_loginUserMutex != NULL && xSemaphoreTake(_loginUserMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        _loginUser = loginUser;
+        safeCopy(_loginUser, loginUser, sizeof(_loginUser));
         xSemaphoreGive(_loginUserMutex);
     }
 }
 
-String WebServerManager::getLoginPassword() {
-    String result = "";
+const char* WebServerManager::getLoginPassword() {
+    static char buf[65];
     if (_loginUserMutex != NULL && xSemaphoreTake(_loginUserMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        result = _loginPassword;
+        safeCopy(buf, _loginPassword, sizeof(buf));
         xSemaphoreGive(_loginUserMutex);
     }
-    return result;
+    return buf;
 }
 
-void WebServerManager::setLoginPassword(String loginPassword) {
+void WebServerManager::setLoginPassword(const char* loginPassword) {
     if (_loginUserMutex != NULL && xSemaphoreTake(_loginUserMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        _loginPassword = loginPassword;
+        safeCopy(_loginPassword, loginPassword, sizeof(_loginPassword));
         xSemaphoreGive(_loginUserMutex);
     }
 }

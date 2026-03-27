@@ -29,13 +29,6 @@
 // Custom includes
 #include "logger.h"
 
-// Helper to safely copy strings into fixed-size char buffers
-static inline void safeCopy(char* dst, const char* src, size_t dstSize) {
-    if (dstSize == 0) return;
-    strncpy(dst, src ? src : "", dstSize - 1);
-    dst[dstSize - 1] = '\0';
-}
-
 struct WeatherData {
     float currentWindSpeed = 0.0;       // km/h
     float currentWindGust = 0.0;        // km/h

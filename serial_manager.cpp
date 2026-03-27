@@ -187,7 +187,7 @@ bool SerialManager::processCalibrationCommands() {
             Serial.println("SAFE MODE - command blocked");
             return true;
         }
-        _motorSensorCtrl.calMoveMotor(_inputString.substring(5), "EL");
+        _motorSensorCtrl.calMoveMotor(_inputString.substring(5).c_str(), "EL");
         return true;
     }
 
@@ -197,7 +197,7 @@ bool SerialManager::processCalibrationCommands() {
             Serial.println("SAFE MODE - command blocked");
             return true;
         }
-        _motorSensorCtrl.calMoveMotor(_inputString.substring(5), "AZ");
+        _motorSensorCtrl.calMoveMotor(_inputString.substring(5).c_str(), "AZ");
         return true;
     }
 

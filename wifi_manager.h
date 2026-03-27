@@ -48,19 +48,19 @@ public:
     void startAPMode();
     
     // Status and information methods
-    String getCurrentBSSID();
-    String getCurrentWiFiChannel();
+    const char* getCurrentBSSID();
+    const char* getCurrentWiFiChannel();
     int32_t getRSSI();
     void printCurrentBSSID();
     int getSignalStrengthLevel(int32_t rssi);
-    String getHostname();
+    const char* getHostname();
     
     // WiFi disable/enable (for S-band interference avoidance)
     void disableWiFi(bool persistent);
     void enableWiFi(bool persistent);
 
     // Public state variables
-    String ip_addr = "0.0.0.0";
+    char ip_addr[16] = "0.0.0.0";
     bool wifiConnected = false;
     std::atomic<bool> wifiDisabled{false};
     
@@ -70,8 +70,8 @@ private:
     Logger& _logger;
     
     // WiFi credentials
-    String wifi_ssid;
-    String wifi_password;
+    char wifi_ssid[33] = "";
+    char wifi_password[65] = "";
     
     // Roaming configuration
     static constexpr int32_t ROAMING_RSSI_THRESHOLD = -75;       // dBm — trigger roaming scan below this
@@ -83,7 +83,7 @@ private:
     const char* _ap_password = "discoverydrive";
     
     // Network configuration
-    String _hostname = "discoverydrive";
+    char _hostname[33] = "discoverydrive";
     int _httpPort = 80;
     
     // ESP-IDF network interface

@@ -56,16 +56,16 @@ public:
     String loadIndexHTML();
 
     // Authentication getters and setters
-    String getLoginUser();
-    void setLoginUser(String loginUser);
-    String getLoginPassword();
-    void setLoginPassword(String loginPassword);
+    const char* getLoginUser();
+    void setLoginUser(const char* loginUser);
+    const char* getLoginPassword();
+    void setLoginPassword(const char* loginPassword);
 
     // Public members
     WebServer* server = nullptr;
     const char* firmwareVersion = "unknown";
-    String wifi_ssid = "";
-    String wifi_password = "";
+    char wifi_ssid[33] = "";
+    char wifi_password[65] = "";
 
 private:
     // Dependencies
@@ -81,12 +81,12 @@ private:
 
     // Authentication configuration
     bool _loginRequired = true;
-    String _loginUser = "";
-    String _loginPassword = "";
+    char _loginUser[33] = "";
+    char _loginPassword[65] = "";
 
     // Firmware update state
     bool _firmwareUpdateSuccess = false;
-    String _firmwareUpdateError = "";
+    char _firmwareUpdateError[128] = "";
 
     // Thread synchronization
     SemaphoreHandle_t _fileMutex = NULL;
