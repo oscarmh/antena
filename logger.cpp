@@ -100,8 +100,20 @@ bool Logger::getSerialOutputDisabled() {
 String Logger::getNewLogMessages() {
     String result;
     if (_logMessagesMutex != NULL && xSemaphoreTake(_logMessagesMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        result = std::move(_newMessages);  // Move instead of copy
-        _newMessages = "";  // Ensure it's in a valid empty state
+        if (_logWritePos > 0 || _logWrapped) {
+            if (_logWrapped) {
+                // Buffer has wrapped: old data from _logWritePos..end, then 0.._logWritePos
+                size_t tailLen = LOG_BUFFER_SIZE - _logWritePos;
+                result.reserve(LOG_BUFFER_SIZE);
+                result.concat(_logBuffer + _logWritePos, tailLen);
+                result.concat(_logBuffer, _logWritePos);
+            } else {
+                // Buffer hasn't wrapped: data from 0.._logWritePos
+                result.concat(_logBuffer, _logWritePos);
+            }
+            _logWritePos = 0;
+            _logWrapped = false;
+        }
         xSemaphoreGive(_logMessagesMutex);
     }
     return result;
@@ -111,36 +123,30 @@ void Logger::addToWebLog(const String& message) {
     if (_logMessagesMutex == NULL) {
         return;
     }
-    
-    if (xSemaphoreTake(_logMessagesMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        // Append directly to buffer — avoids temporary String allocation
-        if (_newMessages.length() > 0) {
-            _newMessages += '\n';
-        }
-        _newMessages += '[';
-        _newMessages += millis();
-        _newMessages += "] ";
-        _newMessages += message;
 
-        // Maintain reasonable buffer size
-        manageBufferSize();
+    if (xSemaphoreTake(_logMessagesMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        // Format: "[millis] message\n"
+        char prefix[16];
+        int prefixLen = snprintf(prefix, sizeof(prefix), "[%lu] ", millis());
+
+        // Write prefix + message + newline into circular buffer
+        const char* parts[] = { prefix, message.c_str(), "\n" };
+        size_t lengths[] = { (size_t)prefixLen, message.length(), 1 };
+
+        for (int p = 0; p < 3; p++) {
+            const char* src = parts[p];
+            size_t len = lengths[p];
+            for (size_t i = 0; i < len; i++) {
+                _logBuffer[_logWritePos] = src[i];
+                _logWritePos++;
+                if (_logWritePos >= LOG_BUFFER_SIZE) {
+                    _logWritePos = 0;
+                    _logWrapped = true;
+                }
+            }
+        }
 
         xSemaphoreGive(_logMessagesMutex);
-    }
-}
-
-void Logger::manageBufferSize() {
-    const size_t MAX_BUFFER_SIZE = 4000;
-    
-    if (_newMessages.length() > MAX_BUFFER_SIZE) {
-        int splitPos = _newMessages.indexOf('\n', _newMessages.length() / 2);
-        if (splitPos > 0) {
-            // More efficient - modify in place
-            _newMessages.remove(0, splitPos + 1);
-        } else {
-            // Fallback: clear if can't split cleanly
-            _newMessages = "";
-        }
     }
 }
 

@@ -22,33 +22,39 @@
 // System includes
 #include <Preferences.h>
 #include <HTTPClient.h>
-#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
 #include <ArduinoJson.h>
-#include <StreamString.h>
 #include <atomic>
 
 // Custom includes
 #include "logger.h"
 
+// Helper to safely copy strings into fixed-size char buffers
+static inline void safeCopy(char* dst, const char* src, size_t dstSize) {
+    if (dstSize == 0) return;
+    strncpy(dst, src ? src : "", dstSize - 1);
+    dst[dstSize - 1] = '\0';
+}
+
 struct WeatherData {
     float currentWindSpeed = 0.0;       // km/h
     float currentWindGust = 0.0;        // km/h
     float currentWindDirection = 0.0;   // degrees
-    String currentTime = "";
+    char currentTime[24] = "";
 
     // Current conditions (non-wind)
     float currentTempC = 0.0;
     float currentPrecipMm = 0.0;
     int currentHumidity = 0;
     int currentConditionCode = 0;
-    String currentConditionText = "";
+    char currentConditionText[64] = "";
     bool currentIsThunderstorm = false;
 
     // 3-hour forecast arrays
     float forecastWindSpeed[3] = {0.0, 0.0, 0.0};
     float forecastWindGust[3] = {0.0, 0.0, 0.0};
     float forecastWindDirection[3] = {0.0, 0.0, 0.0};
-    String forecastTimes[3] = {"", "", ""};
+    char forecastTimes[3][24] = {};
 
     // Forecast conditions (non-wind)
     float forecastTempC[3] = {0.0, 0.0, 0.0};
@@ -56,19 +62,19 @@ struct WeatherData {
     float forecastSnowCm[3] = {0.0, 0.0, 0.0};
     int forecastHumidity[3] = {0, 0, 0};
     int forecastConditionCode[3] = {0, 0, 0};
-    String forecastConditionText[3] = {"", "", ""};
+    char forecastConditionText[3][64] = {};
     bool forecastIsThunderstorm[3] = {false, false, false};
 
     bool dataValid = false;
-    String lastUpdateTime = "";
-    String errorMessage = "";
+    char lastUpdateTime[24] = "";
+    char errorMessage[128] = "";
 };
 
 struct WindSafetyData {
     bool emergencyStowActive = false;
     bool forecastStowActive = false;  // Keep this if you use it elsewhere
     float currentStowDirection = 0.0;
-    String stowReason = "";
+    char stowReason[64] = "";
 };
 
 class WeatherPoller {
@@ -85,7 +91,7 @@ public:
     bool setApiKey(const String& apiKey);
     float getLatitude();
     float getLongitude();
-    String getApiKey();
+    const char* getApiKey();
     bool isLocationConfigured();
     bool isApiKeyConfigured();
     bool isFullyConfigured();
@@ -93,7 +99,7 @@ public:
     // Data access methods (thread-safe)
     WeatherData getWeatherData();
     bool isDataValid();
-    String getLastError();
+    const char* getLastError();
     unsigned long getLastUpdateTime();
 
     // Control methods
@@ -133,7 +139,7 @@ private:
     std::atomic<float> _latitude{0.0};
     std::atomic<float> _longitude{0.0};
     std::atomic<bool> _pollingEnabled{false};
-    String _apiKey = "";
+    char _apiKey[65] = "";
     
     // Sun/Moon display
     std::atomic<bool> _showSunMoon{true};
@@ -169,27 +175,30 @@ private:
     WeatherData _weatherData;
     WindSafetyData _windSafetyData;
 
-    // Persistent TLS client — survives between polls so the TLS session
-    // cache is reused.  First connection: full handshake (~1-2s).
-    // Subsequent connections: session resumption (~100ms).
-    WiFiClientSecure _tlsClient;
+    // Persistent HTTP client — plain HTTP, no TLS overhead (~40KB saved).
+    WiFiClient _httpClient;
+
+    // Pre-allocated response buffer — lives in BSS, zero heap cost.
+    // TLS reads into this, then TLS is freed before JSON parsing.
+    static constexpr size_t RESPONSE_BUF_SIZE = 12288;
+    char _responseBuf[RESPONSE_BUF_SIZE];
 
     // Core functionality helpers
     bool shouldPollWeather();
     bool pollWeatherData();
-    String buildApiUrl();
+    const char* buildApiUrl();
     
     // Data processing helpers
     bool extractCurrentWeather(JsonDocument& doc);
     bool extractForecastWeather(JsonDocument& doc);
     void clearWeatherData();
-    void setErrorState(const String& error);
+    void setErrorState(const char* error);
     
     // Wind safety helpers
     void updateWindSafetyStatus();
     bool checkCurrentWindConditions();
     bool checkForecastWindConditions();
-    void setEmergencyStowState(bool active, const String& reason);
+    void setEmergencyStowState(bool active, const char* reason);
     
     // Weather condition helpers
     bool isThunderstormCode(int code);
@@ -197,12 +206,12 @@ private:
     // Utility methods
     float validateWindSpeed(float speed);
     float validateWindDirection(float direction);
-    String formatWeatherApiTime(const String& apiTime);
-    String getRelativeUpdateTime();
-    int getCurrentHourFromTime(const String& timeStr);
-    int getHourFromTimeString(const String& timeStr);
+    void formatWeatherApiTime(const char* apiTime, char* out, size_t outSize);
+    const char* getRelativeUpdateTime();
+    int getCurrentHourFromTime(const char* timeStr);
+    int getHourFromTimeString(const char* timeStr);
     bool isValidCoordinate(float lat, float lon);
-    bool isValidApiKey(const String& key);
+    bool isValidApiKey(const char* key);
     float normalizeAngle(float angle);
 };
 

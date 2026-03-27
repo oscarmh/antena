@@ -18,6 +18,33 @@
 
 #include "weather_poller.h"
 
+// Print adapter that writes to a pre-allocated char buffer (zero heap cost).
+// Used with http.writeToStream() which handles chunked encoding, etc.
+class BufferPrint : public Stream {
+    char* _buf;
+    size_t _size;
+    size_t _pos;
+public:
+    BufferPrint(char* buf, size_t size) : _buf(buf), _size(size), _pos(0) {}
+    size_t write(uint8_t c) override {
+        if (_pos < _size - 1) { _buf[_pos++] = c; return 1; }
+        return 0;
+    }
+    size_t write(const uint8_t* buf, size_t len) override {
+        size_t room = _size - 1 - _pos;
+        size_t n = (len < room) ? len : room;
+        memcpy(_buf + _pos, buf, n);
+        _pos += n;
+        return n;
+    }
+    size_t length() const { return _pos; }
+    void terminate() { _buf[_pos] = '\0'; }
+    // Stream interface stubs (write-only, never read from)
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+};
+
 // =============================================================================
 // CONSTRUCTOR AND INITIALIZATION
 // =============================================================================
@@ -36,7 +63,8 @@ void WeatherPoller::begin() {
     _latitude = _preferences.getFloat("weather_lat", 0.0);
     _longitude = _preferences.getFloat("weather_lon", 0.0);
     _pollingEnabled = _preferences.getBool("weather_enabled", false);
-    _apiKey = _preferences.getString("weather_api_key", "");
+    String savedKey = _preferences.getString("weather_api_key", "");
+    safeCopy(_apiKey, savedKey.c_str(), sizeof(_apiKey));
     
     // Load sun/moon display preference
     _showSunMoon = _preferences.getBool("showSunMoon", true);
@@ -155,84 +183,73 @@ bool WeatherPoller::shouldPollWeather() {
 }
 
 bool WeatherPoller::pollWeatherData() {
-    String apiUrl = buildApiUrl();
-    if (apiUrl.isEmpty()) {
+    const char* apiUrl = buildApiUrl();
+    if (apiUrl == nullptr) {
         setErrorState("Failed to build API URL");
         return false;
     }
 
-    _logger.debug("Polling weather API: " + apiUrl);
+    _logger.debug("Polling weather API: " + String(apiUrl));
 
-    // Use persistent _tlsClient so TLS session cache survives between polls.
-    // First poll: full TLS handshake (~1-2s).  Subsequent: session resumption
-    // (~100ms), dramatically reducing the blocking window on the calling core.
     bool success = false;
 
     // Clean up any stale connection before starting a new one.
-    // At 5-minute polling intervals the server's keepalive (~60-120s) will have
-    // closed the connection anyway, so the persistent TLS session is already dead.
-    // Stopping first frees the old SSL context and avoids leaking heap.
-    _tlsClient.stop();
-
-    _tlsClient.setInsecure();  // WeatherAPI.com — no cert pinning needed
-    _tlsClient.setTimeout(HTTP_READ_TIMEOUT_MS / 1000);  // Socket timeout in seconds
+    _httpClient.stop();
+    _httpClient.setTimeout(HTTP_READ_TIMEOUT_MS / 1000);
 
     HTTPClient http;
     http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
     http.setTimeout(HTTP_READ_TIMEOUT_MS);
 
-    if (!http.begin(_tlsClient, apiUrl)) {
+    if (!http.begin(_httpClient, apiUrl)) {
         setErrorState("HTTP begin failed");
         return false;
     }
 
     int httpResponseCode = http.GET();
 
-    // Static response buffer — allocated once, reused across polls.
-    // Avoids repeated 12KB alloc/free that fragments heap during active TLS.
-    static StreamString response;
-    response.clear();                           // keep buffer, reset length
     if (httpResponseCode == 200) {
-        int contentLength = http.getSize();    // -1 if chunked
-        size_t reserveSize = (contentLength > 0) ? (size_t)contentLength + 1 : 12288;
-        if (!response.reserve(reserveSize)) {
-            _logger.warn("Could not reserve " + String(reserveSize) + " bytes (free heap: " + String(ESP.getFreeHeap()) + ")");
-        }
-        http.writeToStream(&response);
-        _logger.debug("Weather API response length: " + String(response.length()));
-    }
+        // Read response into pre-allocated char buffer (BSS, zero heap cost).
+        // writeToStream handles chunked encoding; BufferPrint writes to our buffer.
+        BufferPrint bp(_responseBuf, RESPONSE_BUF_SIZE);
+        http.writeToStream(&bp);
+        bp.terminate();
+        size_t totalRead = bp.length();
 
-    http.end();
+        // Done reading — free TLS context (~40KB) before JSON parsing
+        http.end();
+        _httpClient.stop();
 
-    if (httpResponseCode == 200) {
-        if (response.length() == 0) {
+        _logger.debug("Weather API response: " + String(totalRead) + " bytes (free heap: " + String(ESP.getFreeHeap()) + ")");
+
+        if (totalRead == 0) {
             _lastPollWasTruncation = true;
             setErrorState("Empty response from API");
             return false;
         }
 
-        // No client-side filter needed — WeatherAPI is configured to send
-        // only the fields we use (aqi=no, alerts=no, days=2).
         DynamicJsonDocument doc(8192);
-        DeserializationError error = deserializeJson(doc, response.c_str());
-        response.clear();  // Free response buffer before processing
+        DeserializationError error = deserializeJson(doc, _responseBuf);
 
         if (error) {
+            char errBuf[128];
             if (error == DeserializationError::IncompleteInput ||
                 error == DeserializationError::EmptyInput) {
                 _lastPollWasTruncation = true;
-                setErrorState("JSON parse error: " + String(error.c_str()) +
-                              " (truncated response)");
+                snprintf(errBuf, sizeof(errBuf), "JSON parse error: %s (truncated response)", error.c_str());
             } else {
                 _lastPollWasTruncation = false;
-                setErrorState("JSON parse error: " + String(error.c_str()));
+                snprintf(errBuf, sizeof(errBuf), "JSON parse error: %s", error.c_str());
             }
+            setErrorState(errBuf);
         } else {
             _lastPollWasTruncation = false;
 
             if (doc.containsKey("error")) {
-                String apiError = doc["error"]["message"].as<String>();
-                setErrorState("API error: " + apiError);
+                char errBuf[128];
+                const char* apiError = doc["error"]["message"].as<const char*>();
+                snprintf(errBuf, sizeof(errBuf), "API error: %s", apiError ? apiError : "unknown");
+                setErrorState(errBuf);
             } else {
                 bool currentOk = extractCurrentWeather(doc);
                 bool forecastOk = extractForecastWeather(doc);
@@ -240,7 +257,7 @@ bool WeatherPoller::pollWeatherData() {
                 if (currentOk || forecastOk) {
                     if (_weatherDataMutex != NULL && xSemaphoreTake(_weatherDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                         _weatherData.dataValid = true;
-                        _weatherData.errorMessage = "";
+                        _weatherData.errorMessage[0] = '\0';
                         xSemaphoreGive(_weatherDataMutex);
                     }
                     success = true;
@@ -249,18 +266,27 @@ bool WeatherPoller::pollWeatherData() {
                 }
             }
         }
-    } else if (httpResponseCode == 401) {
-        setErrorState("Invalid API key");
-        _logger.error("WeatherAPI authentication failed - check API key");
-    } else if (httpResponseCode == 403) {
-        setErrorState("API key quota exceeded");
-        _logger.error("WeatherAPI quota exceeded");
-    } else if (httpResponseCode > 0) {
-        setErrorState("HTTP error: " + String(httpResponseCode));
-        _logger.error("WeatherAPI HTTP error: " + String(httpResponseCode));
     } else {
-        setErrorState("Network error: " + String(httpResponseCode));
-        _logger.error("WeatherAPI network error: " + String(httpResponseCode));
+        http.end();
+        _httpClient.stop();
+
+        if (httpResponseCode == 401) {
+            setErrorState("Invalid API key");
+            _logger.error("WeatherAPI authentication failed - check API key");
+        } else if (httpResponseCode == 403) {
+            setErrorState("API key quota exceeded");
+            _logger.error("WeatherAPI quota exceeded");
+        } else if (httpResponseCode > 0) {
+            char errBuf[64];
+            snprintf(errBuf, sizeof(errBuf), "HTTP error: %d", httpResponseCode);
+            setErrorState(errBuf);
+            _logger.error("WeatherAPI HTTP error: " + String(httpResponseCode));
+        } else {
+            char errBuf[64];
+            snprintf(errBuf, sizeof(errBuf), "Network error: %d", httpResponseCode);
+            setErrorState(errBuf);
+            _logger.error("WeatherAPI network error: " + String(httpResponseCode));
+        }
     }
 
     return success;
@@ -286,7 +312,7 @@ void WeatherPoller::updateWindSafetyStatus() {
     bool forecastConditionsTriggered = checkForecastWindConditions();
     
     if (currentConditionsTriggered || forecastConditionsTriggered) {
-        String reason = "";
+        const char* reason;
         if (currentConditionsTriggered && forecastConditionsTriggered) {
             reason = "Current and forecast wind conditions exceed thresholds";
         } else if (currentConditionsTriggered) {
@@ -294,7 +320,7 @@ void WeatherPoller::updateWindSafetyStatus() {
         } else {
             reason = "Forecast wind conditions exceed thresholds";
         }
-        
+
         setEmergencyStowState(true, reason);
     } else {
         // SIMPLIFIED: No hysteresis - deactivate immediately when conditions improve
@@ -339,7 +365,7 @@ bool WeatherPoller::checkForecastWindConditions() {
     return false;
 }
 
-void WeatherPoller::setEmergencyStowState(bool active, const String& reason) {
+void WeatherPoller::setEmergencyStowState(bool active, const char* reason) {
     // FIXED: Get weather data BEFORE taking _windSafetyMutex to avoid nested locking.
     // This eliminates potential deadlock if another thread acquires these mutexes
     // in reverse order (_weatherDataMutex -> _windSafetyMutex).
@@ -353,13 +379,13 @@ void WeatherPoller::setEmergencyStowState(bool active, const String& reason) {
         bool wasActive = _windSafetyData.emergencyStowActive;
         
         _windSafetyData.emergencyStowActive = active;
-        _windSafetyData.stowReason = reason;
+        safeCopy(_windSafetyData.stowReason, reason, sizeof(_windSafetyData.stowReason));
         
         if (active) {
             _windSafetyData.currentStowDirection = stowDirection;
             
             if (!wasActive) {
-                _logger.warn("EMERGENCY WIND STOW ACTIVATED: " + reason + 
+                _logger.warn("EMERGENCY WIND STOW ACTIVATED: " + String(reason) +
                            " - Stow direction: " + String(stowDirection, 1) + "°");
             }
         } else {
@@ -489,17 +515,17 @@ bool WeatherPoller::extractCurrentWeather(JsonDocument& doc) {
         int condCode = current["condition"]["code"].as<int>();
         _weatherData.currentConditionCode = condCode;
         const char* condText = current["condition"]["text"];
-        _weatherData.currentConditionText = (condText != nullptr) ? String(condText) : "";
+        safeCopy(_weatherData.currentConditionText, condText, sizeof(_weatherData.currentConditionText));
         _weatherData.currentIsThunderstorm = isThunderstormCode(condCode);
 
-        // Handle time strings carefully to avoid memory leaks
+        // Handle time strings
         const char* timeStr = current["last_updated"];
         if (timeStr != nullptr) {
-            _weatherData.currentTime = String(timeStr);
-            _weatherData.lastUpdateTime = formatWeatherApiTime(_weatherData.currentTime);
+            safeCopy(_weatherData.currentTime, timeStr, sizeof(_weatherData.currentTime));
+            formatWeatherApiTime(_weatherData.currentTime, _weatherData.lastUpdateTime, sizeof(_weatherData.lastUpdateTime));
         } else {
-            _weatherData.currentTime = "Unknown";
-            _weatherData.lastUpdateTime = "Unknown";
+            safeCopy(_weatherData.currentTime, "Unknown", sizeof(_weatherData.currentTime));
+            safeCopy(_weatherData.lastUpdateTime, "Unknown", sizeof(_weatherData.lastUpdateTime));
         }
 
         xSemaphoreGive(_weatherDataMutex);
@@ -526,17 +552,17 @@ bool WeatherPoller::extractForecastWeather(JsonDocument& doc) {
     }
     
     // Get current time from the API response to find our position
-    String currentTimeStr = "";
+    const char* currentTimeStr = "";
     if (doc.containsKey("current") && doc["current"].containsKey("last_updated")) {
         const char* timeStr = doc["current"]["last_updated"];
         if (timeStr != nullptr) {
-            currentTimeStr = String(timeStr);
+            currentTimeStr = timeStr;
         }
     }
 
     // Local structure for parsing outside mutex
     struct ForecastEntry {
-        String time;
+        char time[24];
         float windSpeed;
         float windDirection;
         float windGust;
@@ -545,10 +571,11 @@ bool WeatherPoller::extractForecastWeather(JsonDocument& doc) {
         float snowCm;
         int humidity;
         int conditionCode;
-        String conditionText;
+        char conditionText[64];
         bool isThunderstorm;
     };
     ForecastEntry localForecast[3];
+    memset(localForecast, 0, sizeof(localForecast));
     int forecastCount = 0;
 
     int currentHour = getCurrentHourFromTime(currentTimeStr);
@@ -568,11 +595,11 @@ bool WeatherPoller::extractForecastWeather(JsonDocument& doc) {
 
             // For today (d==0), skip past/current hours; for tomorrow, include all
             if (d == 0) {
-                int hourValue = getHourFromTimeString(String(hourTimeStr));
+                int hourValue = getHourFromTimeString(hourTimeStr);
                 if (hourValue <= currentHour) continue;
             }
 
-            localForecast[forecastCount].time = String(hourTimeStr);
+            safeCopy(localForecast[forecastCount].time, hourTimeStr, sizeof(localForecast[forecastCount].time));
             localForecast[forecastCount].windSpeed = validateWindSpeed(hour["wind_kph"]);
             localForecast[forecastCount].windDirection = validateWindDirection(hour["wind_degree"]);
             localForecast[forecastCount].windGust = validateWindSpeed(hour["gust_kph"]);
@@ -583,11 +610,11 @@ bool WeatherPoller::extractForecastWeather(JsonDocument& doc) {
             int fc = hour["condition"]["code"].as<int>();
             localForecast[forecastCount].conditionCode = fc;
             const char* ft = hour["condition"]["text"];
-            localForecast[forecastCount].conditionText = (ft != nullptr) ? String(ft) : "";
+            safeCopy(localForecast[forecastCount].conditionText, ft, sizeof(localForecast[forecastCount].conditionText));
             localForecast[forecastCount].isThunderstorm = isThunderstormCode(fc);
 
             _logger.debug("Forecast " + String(forecastCount) + ": " +
-                         localForecast[forecastCount].time + " - Wind: " +
+                         String(localForecast[forecastCount].time) + " - Wind: " +
                          String(localForecast[forecastCount].windSpeed, 1) + " km/h");
 
             forecastCount++;
@@ -603,7 +630,7 @@ bool WeatherPoller::extractForecastWeather(JsonDocument& doc) {
     if (_weatherDataMutex != NULL && xSemaphoreTake(_weatherDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         for (int i = 0; i < 3; i++) {
             if (i < forecastCount) {
-                _weatherData.forecastTimes[i] = localForecast[i].time;
+                safeCopy(_weatherData.forecastTimes[i], localForecast[i].time, sizeof(_weatherData.forecastTimes[i]));
                 _weatherData.forecastWindSpeed[i] = localForecast[i].windSpeed;
                 _weatherData.forecastWindDirection[i] = localForecast[i].windDirection;
                 _weatherData.forecastWindGust[i] = localForecast[i].windGust;
@@ -612,10 +639,10 @@ bool WeatherPoller::extractForecastWeather(JsonDocument& doc) {
                 _weatherData.forecastSnowCm[i] = localForecast[i].snowCm;
                 _weatherData.forecastHumidity[i] = localForecast[i].humidity;
                 _weatherData.forecastConditionCode[i] = localForecast[i].conditionCode;
-                _weatherData.forecastConditionText[i] = localForecast[i].conditionText;
+                safeCopy(_weatherData.forecastConditionText[i], localForecast[i].conditionText, sizeof(_weatherData.forecastConditionText[i]));
                 _weatherData.forecastIsThunderstorm[i] = localForecast[i].isThunderstorm;
             } else {
-                _weatherData.forecastTimes[i] = "";
+                _weatherData.forecastTimes[i][0] = '\0';
                 _weatherData.forecastWindSpeed[i] = 0.0f;
                 _weatherData.forecastWindDirection[i] = 0.0f;
                 _weatherData.forecastWindGust[i] = 0.0f;
@@ -624,7 +651,7 @@ bool WeatherPoller::extractForecastWeather(JsonDocument& doc) {
                 _weatherData.forecastSnowCm[i] = 0.0f;
                 _weatherData.forecastHumidity[i] = 0;
                 _weatherData.forecastConditionCode[i] = 0;
-                _weatherData.forecastConditionText[i] = "";
+                _weatherData.forecastConditionText[i][0] = '\0';
                 _weatherData.forecastIsThunderstorm[i] = false;
             }
         }
@@ -640,13 +667,12 @@ bool WeatherPoller::extractForecastWeather(JsonDocument& doc) {
 
 void WeatherPoller::clearWeatherData() {
     if (_weatherDataMutex != NULL && xSemaphoreTake(_weatherDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        // Clear all data and explicitly reset strings to free memory
         _weatherData.currentWindSpeed = 0.0;
         _weatherData.currentWindGust = 0.0;
         _weatherData.currentWindDirection = 0.0;
-        _weatherData.currentTime = "";
-        _weatherData.lastUpdateTime = "Never";
-        _weatherData.errorMessage = "";
+        _weatherData.currentTime[0] = '\0';
+        safeCopy(_weatherData.lastUpdateTime, "Never", sizeof(_weatherData.lastUpdateTime));
+        _weatherData.errorMessage[0] = '\0';
         _weatherData.dataValid = false;
 
         // Clear current non-wind fields
@@ -654,7 +680,7 @@ void WeatherPoller::clearWeatherData() {
         _weatherData.currentPrecipMm = 0.0;
         _weatherData.currentHumidity = 0;
         _weatherData.currentConditionCode = 0;
-        _weatherData.currentConditionText = "";
+        _weatherData.currentConditionText[0] = '\0';
         _weatherData.currentIsThunderstorm = false;
 
         // Clear forecast arrays
@@ -662,13 +688,13 @@ void WeatherPoller::clearWeatherData() {
             _weatherData.forecastWindSpeed[i] = 0.0;
             _weatherData.forecastWindGust[i] = 0.0;
             _weatherData.forecastWindDirection[i] = 0.0;
-            _weatherData.forecastTimes[i] = "";
+            _weatherData.forecastTimes[i][0] = '\0';
             _weatherData.forecastTempC[i] = 0.0;
             _weatherData.forecastPrecipMm[i] = 0.0;
             _weatherData.forecastSnowCm[i] = 0.0;
             _weatherData.forecastHumidity[i] = 0;
             _weatherData.forecastConditionCode[i] = 0;
-            _weatherData.forecastConditionText[i] = "";
+            _weatherData.forecastConditionText[i][0] = '\0';
             _weatherData.forecastIsThunderstorm[i] = false;
         }
 
@@ -676,9 +702,9 @@ void WeatherPoller::clearWeatherData() {
     }
 }
 
-void WeatherPoller::setErrorState(const String& error) {
+void WeatherPoller::setErrorState(const char* error) {
     if (_weatherDataMutex != NULL && xSemaphoreTake(_weatherDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        _weatherData.errorMessage = error;
+        safeCopy(_weatherData.errorMessage, error, sizeof(_weatherData.errorMessage));
         // Keep previous data valid on transient failures so wind safety
         // continues working with stale-but-usable data.
         // Only invalidate if we never had a successful update.
@@ -687,7 +713,7 @@ void WeatherPoller::setErrorState(const String& error) {
         }
         xSemaphoreGive(_weatherDataMutex);
     }
-    _logger.error("Weather polling error: " + error);
+    _logger.error("Weather polling error: " + String(error));
 }
 
 // =============================================================================
@@ -721,28 +747,28 @@ bool WeatherPoller::setLocation(float latitude, float longitude) {
 bool WeatherPoller::setApiKey(const String& apiKey) {
     String trimmedKey = apiKey;
     trimmedKey.trim();
-    
-    if (!isValidApiKey(trimmedKey)) {
+
+    if (!isValidApiKey(trimmedKey.c_str())) {
         _logger.error("Invalid API key format");
         return false;
     }
-    
+
     if (_apiKeyMutex != NULL && xSemaphoreTake(_apiKeyMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        _apiKey = trimmedKey;
+        safeCopy(_apiKey, trimmedKey.c_str(), sizeof(_apiKey));
         xSemaphoreGive(_apiKeyMutex);
     }
-    
+
     // Save to preferences
     _preferences.putString("weather_api_key", trimmedKey);
-    
+
     _logger.info("WeatherAPI key configured");
-    
+
     // Clear old data and force update if now fully configured
     if (isFullyConfigured() && _pollingEnabled) {
         clearWeatherData();
         forceUpdate();
     }
-    
+
     return true;
 }
 
@@ -754,10 +780,12 @@ float WeatherPoller::getLongitude() {
     return _longitude.load();
 }
 
-String WeatherPoller::getApiKey() {
-    String key = "";
+const char* WeatherPoller::getApiKey() {
+    // Returns pointer to mutex-protected buffer — caller must use immediately or copy
+    static char key[65];
+    key[0] = '\0';
     if (_apiKeyMutex != NULL && xSemaphoreTake(_apiKeyMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        key = _apiKey;
+        safeCopy(key, _apiKey, sizeof(key));
         xSemaphoreGive(_apiKeyMutex);
     }
     return key;
@@ -770,8 +798,7 @@ bool WeatherPoller::isLocationConfigured() {
 }
 
 bool WeatherPoller::isApiKeyConfigured() {
-    String key = getApiKey();
-    return isValidApiKey(key);
+    return isValidApiKey(getApiKey());
 }
 
 bool WeatherPoller::isFullyConfigured() {
@@ -804,14 +831,15 @@ bool WeatherPoller::isDataValid() {
     return valid;
 }
 
-String WeatherPoller::getLastError() {
-    String error = "";
-    
+const char* WeatherPoller::getLastError() {
+    static char error[128];
+    error[0] = '\0';
+
     if (_weatherDataMutex != NULL && xSemaphoreTake(_weatherDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        error = _weatherData.errorMessage;
+        safeCopy(error, _weatherData.errorMessage, sizeof(error));
         xSemaphoreGive(_weatherDataMutex);
     }
-    
+
     return error;
 }
 
@@ -880,23 +908,21 @@ bool WeatherPoller::isThunderstormCode(int code) {
 // UTILITY METHODS
 // =============================================================================
 
-String WeatherPoller::buildApiUrl() {
+const char* WeatherPoller::buildApiUrl() {
     if (!isFullyConfigured()) {
-        return "";
+        return nullptr;
     }
-    
-    String apiKey = getApiKey();
-    if (apiKey.isEmpty()) {
-        return "";
+
+    const char* apiKey = getApiKey();
+    if (apiKey[0] == '\0') {
+        return nullptr;
     }
-    
-    String url = "https://api.weatherapi.com/v1/forecast.json";
-    url += "?key=" + apiKey;
-    url += "&q=" + String(_latitude.load(), 6) + "," + String(_longitude.load(), 6);
-    url += "&days=2";
-    url += "&aqi=no";
-    url += "&alerts=no";
-    
+
+    static char url[256];
+    snprintf(url, sizeof(url),
+             "http://api.weatherapi.com/v1/forecast.json?key=%s&q=%.6f,%.6f&days=2&aqi=no&alerts=no",
+             apiKey, _latitude.load(), _longitude.load());
+
     return url;
 }
 
@@ -924,57 +950,47 @@ float WeatherPoller::normalizeAngle(float angle) {
     return angle;
 }
 
-int WeatherPoller::getCurrentHourFromTime(const String& timeStr) {
+int WeatherPoller::getCurrentHourFromTime(const char* timeStr) {
     // Parse time string like "2024-01-15 17:30" to extract hour (17)
-    if (timeStr.length() == 0) {
-        return -1; // Invalid time
+    if (timeStr == nullptr || timeStr[0] == '\0') {
+        return -1;
     }
-    
-    int spaceIndex = timeStr.indexOf(' ');
-    if (spaceIndex == -1) {
-        return -1; // No space found
+
+    const char* space = strchr(timeStr, ' ');
+    if (space == nullptr) {
+        return -1;
     }
-    
-    String timePart = timeStr.substring(spaceIndex + 1); // "17:30"
-    int colonIndex = timePart.indexOf(':');
-    if (colonIndex == -1) {
-        return -1; // No colon found
-    }
-    
-    String hourStr = timePart.substring(0, colonIndex); // "17"
-    return hourStr.toInt();
+
+    const char* timePart = space + 1;  // "17:30"
+    return atoi(timePart);  // atoi stops at ':'
 }
 
-int WeatherPoller::getHourFromTimeString(const String& timeStr) {
-    // Parse time string like "2024-01-15 18:00" to extract hour (18)
+int WeatherPoller::getHourFromTimeString(const char* timeStr) {
     return getCurrentHourFromTime(timeStr);
 }
 
-String WeatherPoller::formatWeatherApiTime(const String& apiTime) {
+void WeatherPoller::formatWeatherApiTime(const char* apiTime, char* out, size_t outSize) {
     // WeatherAPI returns time like "2024-01-15 14:30" (local time at location)
-    // We'll just clean it up for display
-    if (apiTime.length() == 0) {
-        return "Unknown";
+    if (apiTime == nullptr || apiTime[0] == '\0') {
+        safeCopy(out, "Unknown", outSize);
+        return;
     }
-    
-    // Find the space between date and time
-    int spaceIndex = apiTime.indexOf(' ');
-    if (spaceIndex == -1) {
-        return apiTime; // Return as-is if format is unexpected
+
+    const char* space = strchr(apiTime, ' ');
+    if (space == nullptr) {
+        safeCopy(out, apiTime, outSize);
+        return;
     }
-    
-    String datePart = apiTime.substring(0, spaceIndex);
-    String timePart = apiTime.substring(spaceIndex + 1);
-    
-    // Return in format "Jan 15, 14:30" for better readability
-    // For now, just return time part since that's most relevant
-    return timePart + " (local)";
+
+    const char* timePart = space + 1;  // "14:30"
+    snprintf(out, outSize, "%s (local)", timePart);
 }
 
-String WeatherPoller::getRelativeUpdateTime() {
-    // This method is kept for backward compatibility but uses weather data timestamp
+const char* WeatherPoller::getRelativeUpdateTime() {
+    static char buf[24];
     WeatherData data = getWeatherData();
-    return data.lastUpdateTime;
+    safeCopy(buf, data.lastUpdateTime, sizeof(buf));
+    return buf;
 }
 
 bool WeatherPoller::isValidCoordinate(float lat, float lon) {
@@ -982,19 +998,19 @@ bool WeatherPoller::isValidCoordinate(float lat, float lon) {
             (lat != 0.0 || lon != 0.0)); // Exclude 0,0 as it's likely unset
 }
 
-bool WeatherPoller::isValidApiKey(const String& key) {
-    // WeatherAPI.com keys are typically 32 characters long and alphanumeric
-    if (key.length() < 16 || key.length() > 64) {
+bool WeatherPoller::isValidApiKey(const char* key) {
+    if (key == nullptr) return false;
+    size_t len = strlen(key);
+    if (len < 16 || len > 64) {
         return false;
     }
-    
-    // Check for basic alphanumeric pattern (letters, numbers, possibly some symbols)
-    for (int i = 0; i < key.length(); i++) {
-        char c = key.charAt(i);
+
+    for (size_t i = 0; i < len; i++) {
+        char c = key[i];
         if (!isAlphaNumeric(c) && c != '_' && c != '-') {
             return false;
         }
     }
-    
+
     return true;
 }

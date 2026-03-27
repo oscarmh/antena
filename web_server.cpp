@@ -818,18 +818,9 @@ void WebServerManager::setupAPIRoutes() {
         doc["currentDraw"] = r2(ina219Manager.getCurrent() / 1000);
         doc["rotatorPowerDraw"] = r2(ina219Manager.getPower());
 
-        // Log messages
+        // Log messages — circular buffer is already bounded, no truncation needed
         {
             String logMsgs = _logger.getNewLogMessages();
-            static const size_t MAX_LOG_IN_JSON = 2048;
-            if (logMsgs.length() > MAX_LOG_IN_JSON) {
-                int cutPos = logMsgs.indexOf('\n', logMsgs.length() - MAX_LOG_IN_JSON);
-                if (cutPos > 0) {
-                    logMsgs = logMsgs.substring(cutPos + 1);
-                } else {
-                    logMsgs = logMsgs.substring(logMsgs.length() - MAX_LOG_IN_JSON);
-                }
-            }
             doc["newLogMessages"] = logMsgs;
         }
         doc["currentDebugLevel"] = _logger.getDebugLevel();

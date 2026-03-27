@@ -527,16 +527,16 @@ void MotorSensorController::updateWindStowStatus() {
 }
 
 
-void MotorSensorController::setWindStowActive(bool active, const String& reason, float direction) {
+void MotorSensorController::setWindStowActive(bool active, const char* reason, float direction) {
     if (_windStowMutex != NULL && xSemaphoreTake(_windStowMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         bool wasActive = _windStowActive;
-        
+
         _windStowActive = active;
-        _windStowReason = reason;
+        safeCopy(_windStowReason, reason, sizeof(_windStowReason));
         _windStowDirection = direction;
-        
+
         if (active && !wasActive) {
-            _logger.warn("EMERGENCY WIND STOW ACTIVATED: " + reason + 
+            _logger.warn("EMERGENCY WIND STOW ACTIVATED: " + String(reason) +
                        " - Moving to safe direction: " + String(direction, 1) + "°");
             _logger.warn("POWER SAFETY OVERRIDES ENABLED - Power and voltage limits bypassed for emergency stow");
             _logger.warn("Using emergency motor gains - AZ P=" + String(EMERGENCY_STOW_P_AZ) + 
@@ -584,15 +584,15 @@ bool MotorSensorController::isWindStowActive() {
 
 // NEW: Returns all wind stow data atomically under single mutex lock
 WindStowState MotorSensorController::getWindStowState() {
-    WindStowState state = {false, "", 0.0};
-    
+    WindStowState state;
+
     if (_windStowMutex != NULL && xSemaphoreTake(_windStowMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         state.active = _windStowActive.load();
-        state.reason = _windStowReason;
+        safeCopy(state.reason, _windStowReason, sizeof(state.reason));
         state.direction = _windStowDirection;
         xSemaphoreGive(_windStowMutex);
     }
-    
+
     return state;
 }
 

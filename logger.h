@@ -72,13 +72,14 @@ private:
     // Thread synchronization
     SemaphoreHandle_t _logMessagesMutex = NULL;
 
-    // Web log state
-    String _newMessages = "";           // Store new messages since last request
-    bool _clearRequested = false;       // Flag to signal browser to clear
+    // Web log state — fixed circular buffer (no heap fragmentation)
+    static constexpr size_t LOG_BUFFER_SIZE = 4096;
+    char _logBuffer[LOG_BUFFER_SIZE];
+    size_t _logWritePos = 0;    // next write position (wraps)
+    bool _logWrapped = false;   // true once buffer has wrapped
 
     // Utility methods
     void addToWebLog(const String& message);
-    void manageBufferSize();
     String getLevelString(LogLevel level);
 };
 

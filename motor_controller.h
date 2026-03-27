@@ -34,7 +34,7 @@ class WeatherPoller;
 
 struct WindStowState {
     bool active = false;
-    String reason = "None";
+    char reason[64] = "None";
     float direction = 0.0f;
 };
 
@@ -413,7 +413,7 @@ private:
     int _previousquadrantNumber_az = 0;
 
     // Wind stow state
-    String _windStowReason = "";
+    char _windStowReason[64] = "";
     float _windStowDirection = 0.0;
     unsigned long _lastWindStowUpdate = 0;
 
@@ -494,7 +494,7 @@ private:
 
     // Wind safety methods
     void updateWindStowStatus();
-    void setWindStowActive(bool active, const String& reason, float direction);
+    void setWindStowActive(bool active, const char* reason, float direction);
     bool shouldBlockMovement();
 
     // Auto-home methods

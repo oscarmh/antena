@@ -34,7 +34,7 @@
 #endif
 
 // Firmware version
-const char* FIRMWARE_VERSION = "2.0.1";
+const char* FIRMWARE_VERSION = "2.0.2";
 
 // i2c PIN Settings
 const int _SDA_PIN = 7;
