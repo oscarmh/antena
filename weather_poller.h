@@ -168,8 +168,8 @@ private:
     WeatherData _weatherData;
     WindSafetyData _windSafetyData;
 
-    // Persistent HTTP client — plain HTTP, no TLS overhead (~40KB saved).
-    WiFiClient _httpClient;
+    // WiFiClient created fresh per-request in pollWeatherData() to avoid
+    // stale-socket errors when the server closes the idle connection.
 
     // Pre-allocated response buffer — lives in BSS, zero heap cost.
     // TLS reads into this, then TLS is freed before JSON parsing.

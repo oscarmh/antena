@@ -193,15 +193,16 @@ bool WeatherPoller::pollWeatherData() {
 
     bool success = false;
 
-    // Clean up any stale connection before starting a new one.
-    _httpClient.stop();
-    _httpClient.setTimeout(HTTP_READ_TIMEOUT_MS / 1000);
+    // Use a fresh WiFiClient each request to avoid stale-socket errors (-1).
+    // Stack-local client is cleaned up automatically when this function returns.
+    WiFiClient client;
+    client.setTimeout(HTTP_READ_TIMEOUT_MS / 1000);
 
     HTTPClient http;
     http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
     http.setTimeout(HTTP_READ_TIMEOUT_MS);
 
-    if (!http.begin(_httpClient, apiUrl)) {
+    if (!http.begin(client, apiUrl)) {
         setErrorState("HTTP begin failed");
         return false;
     }
@@ -216,9 +217,9 @@ bool WeatherPoller::pollWeatherData() {
         bp.terminate();
         size_t totalRead = bp.length();
 
-        // Done reading — free TLS context (~40KB) before JSON parsing
+        // Done reading — free HTTP resources before JSON parsing
         http.end();
-        _httpClient.stop();
+        client.stop();
 
         _logger.debug("Weather API response: " + String(totalRead) + " bytes (free heap: " + String(ESP.getFreeHeap()) + ")");
 
@@ -268,7 +269,7 @@ bool WeatherPoller::pollWeatherData() {
         }
     } else {
         http.end();
-        _httpClient.stop();
+        client.stop();
 
         if (httpResponseCode == 401) {
             setErrorState("Invalid API key");
