@@ -1273,22 +1273,21 @@ void MotorSensorController::angle_shortest_error_az(float target_angle, float cu
 }
 
 void MotorSensorController::angle_error_el(float target_angle, float current_angle) {
-    // Normalize angles to 0-360 range (fmod preserves sign for negative inputs)
+    // Map both angles to signed [-180, 180] centered at 0° (horizon), then take a
+    // linear difference — NO shortest-path wrap. Elevation has a forbidden zone in
+    // (90, 270): the dish cannot physically traverse 180°. A wrapped error would
+    // pick that path whenever it was nominally shorter (e.g. dish at sensor 269.9,
+    // target sensor 90 → wrapped error -179.9 → motor drives backward through the
+    // forbidden zone). Linear error always routes motion through 0°.
     target_angle = fmod(target_angle, 360);
     if (target_angle < 0) target_angle += 360;
+    if (target_angle > 180) target_angle -= 360;
 
     current_angle = fmod(current_angle, 360);
     if (current_angle < 0) current_angle += 360;
+    if (current_angle > 180) current_angle -= 360;
 
-    // Calculate shortest path error
-    float error = target_angle - current_angle;
-    if (error > 180) {
-        error -= 360;
-    } else if (error < -180) {
-        error += 360;
-    }
-
-    setErrorEl(error);
+    setErrorEl(target_angle - current_angle);
 }
 
 float MotorSensorController::correctAngle(float startAngle, float inputAngle) {
