@@ -60,6 +60,9 @@ void MotorSensorController::begin() {
     _el_offset = _preferences.getFloat("el_offset", 0.0);
     _directionLockEnabled = _preferences.getBool("dirLock", true);
     _extendedElEnabled = _preferences.getBool("extendedEl", false);
+    // Flip mode requires extended elevation; force off if extended is off, regardless
+    // of stored value (defends against stale prefs from a previous session).
+    _flipModeEnabled = _extendedElEnabled.load() && _preferences.getBool("flipMode", false);
     _autoHomeEnabled = _preferences.getBool("autoHome", false);
     _autoHomeTimeoutMs = _preferences.getInt("autoHomeMins", 3) * 60000UL;
     _smoothTrackingEnabled = _preferences.getBool("smoothTrack", false);
@@ -135,9 +138,10 @@ void MotorSensorController::begin() {
     _logger.info("EL START ANGLE: " + String(getElStartAngle()));
     setCorrectedAngleEl(correctAngle(getAdjustedElStartAngle(), degAngleEl));
 
-    // Set home position
+    // Set home position (flip-mode aware so the dish doesn't slew to the wrong axis
+    // pose at boot when flip mode was persisted on)
     setSetPointAzInternal(0);
-    setSetPointElInternal(0);
+    setSetPointElInternal(getHomeElInternal());
 
     // Initialize manual setpoint time
     _lastManualSetpointTime = millis();
@@ -744,11 +748,12 @@ void MotorSensorController::performWindTracking() {
         _logger.info("  Previous dish direction: " + String(_lastWindTrackingDirection, 1) + "°");
         
         // Update setpoints using internal methods to avoid triggering manual command tracking
+        float trackingEl = getHomeElInternal();  // forward horizon — flip-mode aware
         setSetPointAzInternal(optimalDirection);
-        setSetPointElInternal(0.0);  // Keep elevation at 0 for wind tracking
-        
+        setSetPointElInternal(trackingEl);
+
         _lastWindTrackingDirection = optimalDirection;
-        _logger.info("  New setpoints: Az=" + String(optimalDirection, 1) + "°, El=0.0°");
+        _logger.info("  New setpoints: Az=" + String(optimalDirection, 1) + "°, El=" + String(trackingEl, 1) + "°");
         
     } else {
         _logger.debug("Wind tracking: No movement needed (direction unchanged)");
@@ -790,6 +795,28 @@ void MotorSensorController::setExtendedElEnabled(bool enabled) {
     _extendedElEnabled = enabled;
     _preferences.putBool("extendedEl", enabled);
     _logger.info("Extended elevation " + String(enabled ? "enabled (-90 to 90)" : "disabled (0 to 90)"));
+
+    // Flip mode is meaningless without the [-90, +90] range, so cascade-disable.
+    if (!enabled && _flipModeEnabled.load()) {
+        setFlipModeEnabled(false);
+    }
+}
+
+void MotorSensorController::setFlipModeEnabled(bool enabled) {
+    if (enabled && !_extendedElEnabled.load()) {
+        _logger.warn("Flip mode requires Negative Elevation to be enabled - ignoring");
+        return;
+    }
+    _flipModeEnabled = enabled;
+    _preferences.putBool("flipMode", enabled);
+    _logger.info("Flip mode " + String(enabled ? "enabled (0 to 180)" : "disabled"));
+
+    // On enable, slew to flip 0° (= internal +90°, zenith) so the user starts a pass
+    // from a known position. setSetPointEl runs all the usual external-input guards
+    // (wind stow, over-power backoff) and clears auto-home/wind-tracking.
+    if (enabled) {
+        setSetPointEl(flipToInternal(0.0f));
+    }
 }
 
 // =============================================================================
@@ -832,7 +859,7 @@ void MotorSensorController::checkAutoHome() {
 
     // Determine home position (same logic as /submitHome)
     float homeAz = 0.0f;
-    float homeEl = 0.0f;
+    float homeEl = getHomeElInternal();
     if (_weatherPoller != nullptr && _weatherPoller->isWindBasedHomeEnabled()) {
         homeAz = _weatherPoller->getWindBasedHomePosition();
     }

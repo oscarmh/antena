@@ -426,8 +426,14 @@
         <td><span id="extendedElEnabled" class="editable" data-type="toggle" data-on-url="/extendedElOn" data-off-url="/extendedElOff">Loading...</span></td>
         <td>OFF</td>
       </tr>
+      <tr id="flipModeRow" style="display:none">
+        <td>Flip Mode (0 to 180)</td>
+        <td><span id="flipModeEnabled" class="editable" data-type="toggle" data-on-url="/flipModeOn" data-off-url="/flipModeOff">Loading...</span></td>
+        <td>OFF</td>
+      </tr>
     </table>
     <p><strong>WARNING:</strong> Negative elevation could jam your rotator if a dish or large antenna is attached.</p>
+    <p><strong>Flip Mode:</strong> requires Negative Elevation. Re-expresses the elevation axis as 0&deg;&ndash;180&deg; (0=zenith, 90=horizon, 180=flipped over) so a satellite pass over zenith can be tracked without rotating azimuth 180&deg;. Enabling moves the dish to flip 0&deg; (zenith).</p>
 
     <table>
       <tr>

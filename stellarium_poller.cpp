@@ -121,15 +121,24 @@ bool StellariumPoller::processApiResponse(const String& payload) {
         az += 360.0;
     }
 
-    // Validate and clean up elevation (respect extended elevation mode)
+    // Validate and clean up elevation (respect extended elevation + flip mode)
     if (isnan(el)) el = 0;
-    float minEl = _motorSensorCtrl.isExtendedElEnabled() ? -90.0f : 0.0f;
-    if (el < minEl) el = minEl;
-    if (el > 90) el = 90;
+    float elInternal;
+    if (_motorSensorCtrl.isFlipModeEnabled()) {
+        // Stellarium speaks flip [0, 180]; clamp on that scale, then translate.
+        if (el < 0.0f) el = 0.0f;
+        if (el > 180.0f) el = 180.0f;
+        elInternal = MotorSensorController::flipToInternal(el);
+    } else {
+        float minEl = _motorSensorCtrl.isExtendedElEnabled() ? -90.0f : 0.0f;
+        if (el < minEl) el = minEl;
+        if (el > 90) el = 90;
+        elInternal = el;
+    }
 
     // Update motor controller setpoints
     _motorSensorCtrl.setSetPointAz(az);
-    _motorSensorCtrl.setSetPointEl(el);
+    _motorSensorCtrl.setSetPointEl(elInternal);
 
     _logger.debug("Stellarium target - Az: " + String(az, 2) + "°, El: " + String(el, 2) + "°");
     

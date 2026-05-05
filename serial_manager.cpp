@@ -92,21 +92,21 @@ bool SerialManager::processPositionQueries() {
         Serial.print("AZ");
         Serial.print(_motorSensorCtrl.getCorrectedAngleAz());
         Serial.print(" EL");
-        Serial.println(_motorSensorCtrl.getCorrectedAngleEl());
+        Serial.println(displayElevation(_motorSensorCtrl.getCorrectedAngleEl()));
         updateSerialActivity();
         return true;
     }
-    
+
     if (_inputString == "AZ") {
         Serial.print("AZ");
         Serial.println(_motorSensorCtrl.getCorrectedAngleAz());
         updateSerialActivity();
         return true;
     }
-    
+
     if (_inputString == "EL") {
         Serial.print("EL");
-        Serial.println(_motorSensorCtrl.getCorrectedAngleEl());
+        Serial.println(displayElevation(_motorSensorCtrl.getCorrectedAngleEl()));
         updateSerialActivity();
         return true;
     }
@@ -138,7 +138,7 @@ bool SerialManager::processPositionCommands() {
             return true;
         }
         _motorSensorCtrl.setSetPointAz(0);
-        _motorSensorCtrl.setSetPointEl(0);
+        _motorSensorCtrl.setSetPointEl(_motorSensorCtrl.getHomeElInternal());
         return true;
     }
 
@@ -330,12 +330,27 @@ float SerialManager::validateAndCleanAzimuth(float az) {
 float SerialManager::validateAndCleanElevation(float el) {
     if (isnan(el)) el = 0;
 
+    if (_motorSensorCtrl.isFlipModeEnabled()) {
+        // Client speaks flip [0, 180]; clamp on that scale, then translate to internal.
+        if (el < 0.0f) el = 0.0f;
+        if (el > 180.0f) el = 180.0f;
+        return MotorSensorController::flipToInternal(el);
+    }
+
     // Clamp elevation respecting extended elevation mode
     float minEl = _motorSensorCtrl.isExtendedElEnabled() ? -90.0f : 0.0f;
     if (el < minEl) el = minEl;
     if (el > 90) el = 90;
 
     return el;
+}
+
+float SerialManager::displayElevation(float internalEl) {
+    if (!_motorSensorCtrl.isFlipModeEnabled()) return internalEl;
+    // Sensor angles wrap at 360°; normalize to (-180, 180] before flipping so
+    // values like 359.5° (≈ -0.5° internal) emit ~90.5° in flip rather than -269.5°.
+    if (internalEl > 180.0f) internalEl -= 360.0f;
+    return MotorSensorController::internalToFlip(internalEl);
 }
 
 void SerialManager::printStatusInfo() {
@@ -345,10 +360,10 @@ void SerialManager::printStatusInfo() {
     
     // === CURRENT POSITION & SETPOINTS ===
     Serial.println("--- Current Position & Setpoints ---");
-    Serial.println("Corrected Angle Elevation: " + String(_motorSensorCtrl.getCorrectedAngleEl(), 2) + "°");
+    Serial.println("Corrected Angle Elevation: " + String(displayElevation(_motorSensorCtrl.getCorrectedAngleEl()), 2) + "°");
     Serial.println("Corrected Angle Azimuth: " + String(_motorSensorCtrl.getCorrectedAngleAz(), 2) + "°");
     Serial.println("Azimuth Setpoint: " + String(_motorSensorCtrl.getSetPointAz(), 2) + "°");
-    Serial.println("Elevation Setpoint: " + String(_motorSensorCtrl.getSetPointEl(), 2) + "°");
+    Serial.println("Elevation Setpoint: " + String(displayElevation(_motorSensorCtrl.getSetPointEl()), 2) + "°");
     Serial.println("Azimuth State: " + String(_motorSensorCtrl.setPointState_az ? "ACTIVE" : "STOPPED"));
     Serial.println("Elevation State: " + String(_motorSensorCtrl.setPointState_el ? "ACTIVE" : "STOPPED"));
     Serial.println("Azimuth Error: " + String(_motorSensorCtrl.getErrorAz(), 3) + "°");

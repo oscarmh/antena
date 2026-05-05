@@ -183,9 +183,11 @@ void WebServerManager::setupMotorControlRoutes() {
             String update_var = server->arg("new_setpoint_el");
             if (update_var.length() != 0) {
                 float el;
-                float minEl = msc.isExtendedElEnabled() ? -90.0f : 0.0f;
-                if (parseFloat(update_var, el) && el >= minEl && el <= 90) {
-                    msc.setSetPointEl(el);
+                bool flipMode = msc.isFlipModeEnabled();
+                float minEl = flipMode ? 0.0f : (msc.isExtendedElEnabled() ? -90.0f : 0.0f);
+                float maxEl = flipMode ? 180.0f : 90.0f;
+                if (parseFloat(update_var, el) && el >= minEl && el <= maxEl) {
+                    msc.setSetPointEl(flipMode ? MotorSensorController::flipToInternal(el) : el);
                 }
             }
         }
@@ -208,7 +210,7 @@ void WebServerManager::setupMotorControlRoutes() {
     // In the motor control routes section, update the home function:
     server->on("/submitHome", HTTP_POST, [this]() {
         float homeAz = 0.0;
-        float homeEl = 0.0;
+        float homeEl = msc.getHomeElInternal();
 
         // Check if wind-based home is enabled
         if (weatherPoller.isWindBasedHomeEnabled()) {
@@ -312,6 +314,15 @@ void WebServerManager::setupMotorControlRoutes() {
     server->on("/extendedElOff", HTTP_GET, [this]() {
         msc.setExtendedElEnabled(false);
         server->send(200, "text/plain", "Extended elevation OFF");
+    });
+
+    server->on("/flipModeOn", HTTP_GET, [this]() {
+        msc.setFlipModeEnabled(true);
+        server->send(200, "text/plain", msc.isFlipModeEnabled() ? "Flip mode ON" : "Flip mode rejected (Negative Elevation off)");
+    });
+    server->on("/flipModeOff", HTTP_GET, [this]() {
+        msc.setFlipModeEnabled(false);
+        server->send(200, "text/plain", "Flip mode OFF");
     });
 
     server->on("/autoHomeOn", HTTP_GET, [this]() {
@@ -792,14 +803,23 @@ void WebServerManager::setupAPIRoutes() {
         // Motor and control data — use native numeric types to avoid String heap allocations
         float displayEl = msc.getCorrectedAngleEl();
         if (displayEl > 180.0f) displayEl -= 360.0f;
-        doc["correctedAngle_el"] = r2(displayEl);
+        float setpointEl = msc.getSetPointEl();
+        // In flip mode the user-facing axis is [0, 180] = 90° - internal. The frontend
+        // also receives the raw internal values so the polar plot can stay correct.
+        bool flipMode = msc.isFlipModeEnabled();
+        doc["correctedAngle_el"] = r2(flipMode ? MotorSensorController::internalToFlip(displayEl) : displayEl);
+        doc["correctedAngle_el_internal"] = r2(displayEl);
         doc["correctedAngle_az"] = r2(msc.getCorrectedAngleAz());
         doc["setpoint_az"] = r2(msc.getSetPointAz());
-        doc["setpoint_el"] = r2(msc.getSetPointEl());
+        doc["setpoint_el"] = r2(flipMode ? MotorSensorController::internalToFlip(setpointEl) : setpointEl);
+        doc["setpoint_el_internal"] = r2(setpointEl);
         doc["setPointState_az"] = (int)msc.setPointState_az.load();
         doc["setPointState_el"] = (int)msc.setPointState_el.load();
         doc["error_az"] = r2((float)msc.getErrorAz());
-        doc["error_el"] = r2((float)msc.getErrorEl());
+        // Flip mode reverses the EL axis (flip = 90 - internal), so error sign
+        // flips too — keep the displayed error consistent with the displayed
+        // setpoint and corrected angle.
+        doc["error_el"] = r2((float)msc.getErrorEl() * (flipMode ? -1.0f : 1.0f));
         doc["el_startAngle"] = r2(msc.getElStartAngle());
         doc["needs_unwind"] = msc.needs_unwind.load();
 
@@ -826,8 +846,12 @@ void WebServerManager::setupAPIRoutes() {
         doc["currentDebugLevel"] = _logger.getDebugLevel();
 
         if (msc.isSmoothTrackingEnabled()) {
+            float kalmanEl = msc.getKalmanElPos();
             doc["kalmanAzPos"] = r2(msc.getKalmanAzPos());
-            doc["kalmanElPos"] = r2(msc.getKalmanElPos());
+            // -1.0f is the literal sentinel for "Kalman not initialized" — pass through
+            // untranslated so the frontend's existing sentinel handling still works.
+            doc["kalmanElPos"] = r2((flipMode && kalmanEl != -1.0f) ? MotorSensorController::internalToFlip(kalmanEl) : kalmanEl);
+            doc["kalmanElPos_internal"] = r2(kalmanEl);
             doc["kalmanAzVel"] = r2(msc.getKalmanAzVel());
             doc["kalmanElVel"] = r2(msc.getKalmanElVel());
         }
@@ -855,6 +879,7 @@ void WebServerManager::setupAPIRoutes() {
 
         // Slow-changing status flags
         doc["extendedElEnabled"] = msc.isExtendedElEnabled() ? "ON" : "OFF";
+        doc["flipModeEnabled"] = msc.isFlipModeEnabled() ? "ON" : "OFF";
         doc["stellariumConnActive"] = stellariumPoller.getStellariumConnActive() ? "Connected" : "Disconnected";
         doc["serialOutputDisabled"] = _logger.getSerialOutputDisabled();
         doc["calMode"] = msc.calMode ? "ON" : "OFF";

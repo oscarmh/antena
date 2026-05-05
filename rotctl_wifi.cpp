@@ -283,13 +283,20 @@ void RotctlWifi::handlePositionCommand(const String& request) {
 
 void RotctlWifi::handleGetPositionCommand() {
     float el = _motorSensorCtrl.getCorrectedAngleEl();
-    
+
     // Hack to stop it breaking displays in satdump when el sits at ~359.99 instead of 0
     if (el > 359) {
         el = 0;
     }
-    
-    String response = String(_motorSensorCtrl.getCorrectedAngleAz(), 2) + "\n" + 
+
+    if (_motorSensorCtrl.isFlipModeEnabled()) {
+        // Normalize internal angle to (-180, 180] before translating, otherwise
+        // sensor readings near 360° (e.g. 359.5 = -0.5°) would emit absurd flip values.
+        if (el > 180.0f) el -= 360.0f;
+        el = MotorSensorController::internalToFlip(el);
+    }
+
+    String response = String(_motorSensorCtrl.getCorrectedAngleAz(), 2) + "\n" +
                      String(el, 2) + "\n";
     _rotator_client.print(response);
     _logger.debug("Responded with position: " + response);
@@ -307,9 +314,10 @@ void RotctlWifi::handleResetCommand() {
 }
 
 void RotctlWifi::handleParkCommand() {
+    float homeEl = _motorSensorCtrl.getHomeElInternal();
     _motorSensorCtrl.setSetPointAz(0);
-    _motorSensorCtrl.setSetPointEl(0); 
-    _logger.info("Parking rotator to home position (0, 0)");
+    _motorSensorCtrl.setSetPointEl(homeEl);
+    _logger.info("Parking rotator to home position (0, " + String(homeEl, 1) + ")");
 }
 
 float RotctlWifi::cleanupAzimuth(float az) {
@@ -328,6 +336,13 @@ float RotctlWifi::cleanupAzimuth(float az) {
 float RotctlWifi::cleanupElevation(float el) {
     if (isnan(el)) {
         el = 0;
+    }
+
+    if (_motorSensorCtrl.isFlipModeEnabled()) {
+        // Client speaks flip [0, 180]; clamp on that scale, then translate to internal.
+        if (el < 0.0f) el = 0.0f;
+        if (el > 180.0f) el = 180.0f;
+        return MotorSensorController::flipToInternal(el);
     }
 
     float minEl = _motorSensorCtrl.isExtendedElEnabled() ? -90.0f : 0.0f;

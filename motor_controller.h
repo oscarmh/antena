@@ -183,6 +183,20 @@ public:
     bool isExtendedElEnabled() const { return _extendedElEnabled.load(); }
     void setExtendedElEnabled(bool enabled);
 
+    // Flip mode: re-expresses the extended-elevation [-90, +90] range as user-facing
+    // [0, 180] where 0=zenith (internal +90), 90=horizon (internal 0), 180=flipped over
+    // (internal -90). Lets a satellite pass over zenith be tracked without an AZ flip
+    // by sweeping the elevation axis through 180° instead. Requires extended elevation.
+    std::atomic<bool> _flipModeEnabled = false;
+    bool isFlipModeEnabled() const { return _flipModeEnabled.load(); }
+    void setFlipModeEnabled(bool enabled);
+    static float flipToInternal(float flipDeg) { return 90.0f - flipDeg; }
+    static float internalToFlip(float internalDeg) { return 90.0f - internalDeg; }
+    // Rest/home elevation in internal coords. Flip mode mounts the antenna boom such
+    // that the user-facing 0° (forward horizon) lives at internal +90°, so home/park
+    // /auto-home/wind-tracking all need to track the mode rather than hardcoding 0.
+    float getHomeElInternal() const { return _flipModeEnabled.load() ? 90.0f : 0.0f; }
+
     // Auto-home state
     std::atomic<bool> _autoHomeEnabled{false};
     bool isAutoHomeEnabled() const { return _autoHomeEnabled.load(); }

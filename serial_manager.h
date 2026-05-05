@@ -67,6 +67,7 @@ private:
     void parseAndSetPosition();
     float validateAndCleanAzimuth(float az);
     float validateAndCleanElevation(float el);
+    float displayElevation(float internalEl);
     void printStatusInfo();
     void updateSerialActivity();
 
