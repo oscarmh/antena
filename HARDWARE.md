@@ -38,11 +38,11 @@ Fork of [KrakenRF Discovery Drive](https://github.com/krakenrf/discovery_drive) 
 | **MCU** | ESP32-S3 DevKitC | Same as original Discovery Drive |
 | **Servo AZ** | Feetech STS3250, 12V, 50 kg·cm, TTL bus | Smart servo — position + speed + load feedback |
 | **Servo EL** | Feetech STS3250, 12V, 50 kg·cm, TTL bus | Same model, ID=2 |
-| **Servo interface** | Feetech URT-2 | TTL half-duplex converter + powers ESP32 from 12V |
+| **Servo interface** | Feetech URT-2 | TTL half-duplex converter. UART pins connect to ESP32 Serial2. Check if it has 5V regulated output for ESP32 — if not, add LM2596 buck 12V→5V |
 | **Power monitor** | INA219, I2C addr 0x45 | Monitors total 12V consumption (kept from original) |
 | **Power supply** | 12V DC, 10A | Single supply for everything |
 
-> The URT-2 board provides: 12V→5V/3.3V regulation for ESP32, TTL half-duplex bus conversion, and servo power distribution. No separate buck converter needed.
+> **URT-2 note:** Used in UART mode (2.54 pin header) to connect ESP32 Serial2 to the servo TTL bus. Wiring: TX→TX, RX→RX, V→V, G→G. Also useful for initial servo setup (assign IDs via USB-C + FD software). Verify if it provides regulated 5V output for ESP32 — if not, add an LM2596 buck converter (12V→5V) to the BOM.
 
 ### Wiring
 
