@@ -87,3 +87,35 @@ ESP32-S3 I2C SDA=GPIO7, SCL=GPIO6 → INA219 (0x45)
 5. **Flanged bearing** on opposite arm takes the other end of the EL shaft
 6. **Crossboom** clamps to EL shaft via double saddle clamp
 7. **Electronics box** (IP66) mounted on side of rotating plate
+
+---
+
+## Servo ID Assignment (do this before installation)
+
+All STS3250 servos ship with **ID=1** by default. You must assign unique IDs before connecting them to the same bus.
+
+**Required:** Feetech FD Debug Tool — download from [feetech.cn](https://www.feetech.cn) or search "FD Feetech Debug Tool"
+
+**Procedure (one servo at a time):**
+
+1. Connect **only one servo** to the URT-2 (never two with the same ID simultaneously)
+2. Connect URT-2 to PC via USB-C
+3. Supply 12V to the URT-2 power terminal
+4. Open FD Debug Tool → select the correct COM port → click Scan
+5. The servo appears with its current ID (default: 1)
+6. Change ID to desired value and click Write (saves to servo EEPROM)
+7. Disconnect servo, connect next one, repeat
+
+**ID assignment:**
+
+| Servo | ID | Axis |
+|---|---|---|
+| STS3250 #1 | **1** | Azimuth (AZ) |
+| STS3250 #2 | **2** | Elevation (EL) |
+
+> ⚠️ Never connect two servos with the same ID to the bus — bus collision, both will be unresponsive.
+
+**Also verify/set while in FD tool:**
+- Baud rate: **1000000 bps** (default, must match firmware)
+- Operating mode: **Position mode** (default)
+- Acceleration: set to **50** for gentle antenna-safe starts
