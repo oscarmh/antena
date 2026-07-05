@@ -68,6 +68,16 @@ ESP32-S3 I2C SDA=GPIO7, SCL=GPIO6 → INA219 (0x45)
 
 ---
 
+## GPS/IMU Module
+
+| Component | Spec | Source | Notes |
+|---|---|---|---|
+| **Witmotion WTGPS-02H** | GPS/GNSS + MEMS IMU | AliExpress item 1005006478238149 | Dual antenna integrated, outputs heading + pitch + roll + lat/lon/alt via UART. 0.2° heading accuracy. No external antenna needed |
+
+**Wiring:** UART (TX/RX) to ESP32 Serial1. 3.3-5V power.
+
+---
+
 ## Antenna Configuration
 
 - 2× Yagi UHF 435 MHz, 9–11 elements, ~300–500g each
