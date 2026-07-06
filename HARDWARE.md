@@ -1,14 +1,15 @@
 # Hardware Design — Az/El Antenna Rotator
 
-Fork of [KrakenRF Discovery Drive](https://github.com/krakenrf/discovery_drive) adapted for Feetech STS3250 smart servos.
+Portable Az/El antenna rotator for 2× Yagi UHF phased array. Based on KrakenRF Discovery Drive concept, adapted for Feetech STS3250 smart servos and Raspberry Pi 4.
 
 ## Design Goals
 
 - IP65+ weatherproof outdoor installation
 - 2× Yagi UHF (435 MHz) phased antennas, ~5 kg total load
 - Az: ±360° rotation | El: 0–90°
-- No slip ring (±360° limit, unwind between passes — same as Discovery Drive)
-- Self-contained: ESP32-S3 + web UI + rotctl + Stellarium support
+- No slip ring (±360° limit, unwind between passes)
+- **Portable** — auto lat/lon/heading via GPS/IMU, no manual alignment
+- Self-contained: RPi4 runs SatDump + GPredict + web UI + rotctl + servo control
 
 ---
 
@@ -18,14 +19,14 @@ Fork of [KrakenRF Discovery Drive](https://github.com/krakenrf/discovery_drive) 
 |---|---|---|---|
 | Turntable bearing | Stainless 304, Ø250mm | AliExpress: `304 stainless turntable bearing 250mm` | Base azimuth bearing |
 | Base plate (fixed) | Aluminium 3mm, 300×300mm | AliExpress: `aluminum plate 300x300 3mm` | Bolted to mast |
-| Rotating plate | Aluminium 3mm, 300×300mm | AliExpress: `aluminum plate 300x300 3mm` | Rides on lazy susan |
+| Rotating plate | Aluminium 3mm, 300×300mm | AliExpress: `aluminum plate 300x300 3mm` | Rides on turntable bearing |
 | Yoke arms ×2 | Aluminium L-profile 40×40×3mm, 200mm | AliExpress: `aluminum angle 40x40 3mm` | Support elevation axis |
 | Elevation shaft | Aluminium rod Ø8mm, 200mm | AliExpress: `aluminum shaft 8mm` | EL pivot |
 | Flanged bearing | Ø8mm | AliExpress: `flanged bearing 8mm` | Opposite side of EL servo |
 | Crossboom | Aluminium tube Ø20mm, 700mm | AliExpress: `aluminum tube 20mm 1m` | Holds both Yagis |
 | U-bolt ×8 | M6, Ø20mm, stainless | AliExpress: `U bolt M6 20mm stainless` | Fix Yagi boom to crossboom |
 | Tube clamp | Double saddle Ø20mm | AliExpress: `double saddle clamp 20mm` | Crossboom to EL axis |
-| Electronics enclosure | IP66, aluminium, 150×100×75mm | AliExpress: `aluminum waterproof enclosure IP66 150x100` | Houses ESP32 + URT-2 |
+| Electronics enclosure | IP66, aluminium, ~200×150×100mm | AliExpress: `aluminum waterproof enclosure IP66 200x150` | Houses RPi4 + URT-2 + buck |
 | Cable gland ×4 | PG11, stainless | AliExpress: `PG11 cable gland stainless` | Waterproof cable entry |
 | M12 connector ×2 | 4-pin, IP67 | AliExpress: `M12 connector 4pin IP67` | Servo cables |
 
@@ -35,26 +36,28 @@ Fork of [KrakenRF Discovery Drive](https://github.com/krakenrf/discovery_drive) 
 
 | Component | Spec | Notes |
 |---|---|---|
-| **MCU** | ESP32-S3 DevKitC | Same as original Discovery Drive |
-| **Servo AZ** | Feetech STS3250, 12V, 50 kg·cm, TTL bus | Smart servo — position + speed + load feedback |
-| **Servo EL** | Feetech STS3250, 12V, 50 kg·cm, TTL bus | Same model, ID=2 |
-| **Buck converter** | LM2596 12V→5V, 3A | Powers ESP32-S3 from 12V rail. URT-2 does NOT regulate 5V for MCU |
-| **Servo interface** | Feetech URT-2 | TTL half-duplex bus converter. UART pins to ESP32 Serial2 (TX2/RX2). Servo power via 12V terminal block |
+| **Controller** | Raspberry Pi 4, 4GB | Runs Python servo control, SatDump, GPredict, web UI, rotctl |
+| **Servo AZ** | Feetech STS3250, 12V, 50 kg·cm, TTL bus | Smart servo — position + speed + load feedback. ID=1 |
+| **Servo EL** | Feetech STS3250, 12V, 50 kg·cm, TTL bus | Same model. ID=2 |
+| **Servo interface** | Feetech URT-2 | Connected via USB-C to RPi4 → `/dev/ttyUSB0`. 12V servo power via terminal block |
+| **GPS/IMU** | Witmotion WTGPS-02H | Dual antenna, MEMS IMU. Outputs heading+pitch+roll+lat/lon/alt via UART → `/dev/ttyUSB1` or GPIO UART |
+| **Power monitor** | INA219, I2C addr 0x45 | Monitors 12V consumption. Connected to RPi4 I2C (GPIO2/3) |
+| **Buck converter** | 12V→5V 3A (LM2596 or similar) | Powers RPi4 from 12V rail |
 | **Power supply** | 12V DC, 10A | Single supply for everything |
-
-> **URT-2 note:** Used in UART mode (2.54 pin header) to connect ESP32 Serial2 to the servo TTL bus. Wiring: TX→TX, RX→RX, V→V, G→G. Also useful for initial servo setup (assign IDs via USB-C + FD software). Verify if it provides regulated 5V output for ESP32 — if not, add an LM2596 buck converter (12V→5V) to the BOM.
+| **RTL-SDR** | RTL-SDR Blog v4 or similar | USB to RPi4 for satellite reception via SatDump |
 
 ### Wiring
 
 ```
 12V DC input
     ├── URT-2 (12V terminal) → STS3250 AZ (ID=1) + STS3250 EL (ID=2)
-    └── LM2596 buck (12V→5V) → ESP32-S3 5V pin
+    ├── LM2596 buck (12V→5V/3A) → RPi4 USB-C power
+    └── INA219 shunt (inline on 12V) → RPi4 I2C GPIO2/3
 
-ESP32-S3 GPIO17 (TX2) → URT-2 TX
-ESP32-S3 GPIO18 (RX2) → URT-2 RX
-ESP32-S3 GND          → URT-2 GND
-ESP32-S3 I2C SDA=GPIO7, SCL=GPIO6 → INA219 (0x45)
+RPi4 USB → URT-2 USB-C     (/dev/ttyUSB0 — servo bus)
+RPi4 USB → WTGPS-02H USB   (/dev/ttyUSB1 — GPS/IMU) OR GPIO14/15 UART
+RPi4 USB → RTL-SDR          (/dev/bus/usb — SDR receiver)
+RPi4 I2C GPIO2(SDA)/GPIO3(SCL) → INA219 (0x45)
 ```
 
 ### Power Budget
@@ -63,7 +66,8 @@ ESP32-S3 I2C SDA=GPIO7, SCL=GPIO6 → INA219 (0x45)
 |---|---|
 | STS3250 AZ (stall) | ~3A |
 | STS3250 EL (stall) | ~3A |
-| ESP32-S3 + URT-2 | ~0.5A |
+| Raspberry Pi 4 | ~1.2A |
+| RTL-SDR | ~0.3A |
 | **Total with margin** | **~10A** |
 
 ---
@@ -74,7 +78,20 @@ ESP32-S3 I2C SDA=GPIO7, SCL=GPIO6 → INA219 (0x45)
 |---|---|---|---|
 | **Witmotion WTGPS-02H** | GPS/GNSS + MEMS IMU | AliExpress item 1005006478238149 | Dual antenna integrated, outputs heading + pitch + roll + lat/lon/alt via UART. 0.2° heading accuracy. No external antenna needed |
 
-**Wiring:** UART (TX/RX) to ESP32 Serial1. 3.3-5V power.
+**Why needed:** Portable use — auto lat/lon/alt for satellite pass prediction, auto heading for north alignment. No manual setup needed in field.
+
+---
+
+## Software Stack (RPi4)
+
+| Software | Purpose |
+|---|---|
+| Python 3 + scservo | Servo control (STS3250 via URT-2) |
+| GPredict | Satellite tracking + rotctl output |
+| SatDump | Satellite signal decoding (NOAA, Meteor, GOES…) |
+| rotctld (hamlib) | Rotator control daemon — GPredict → Python servo controller |
+| Flask or FastAPI | Web UI for manual control |
+| gpsd | GPS daemon for WTGPS-02H |
 
 ---
 
@@ -90,8 +107,8 @@ ESP32-S3 I2C SDA=GPIO7, SCL=GPIO6 → INA219 (0x45)
 
 ## Mechanical Assembly — Key Points
 
-1. **Lazy susan** sits between fixed plate (bolted to mast) and rotating plate
-2. **STS3250 AZ** is bolted to the rotating plate; its output shaft engages the fixed plate via a gear or direct drive
+1. **Turntable bearing** sits between fixed plate (bolted to mast) and rotating plate
+2. **STS3250 AZ** bolted to the rotating plate; output shaft drives against fixed plate
 3. **Yoke** (two aluminium L-arms) rises from the rotating plate, ~200mm height
 4. **STS3250 EL** bolted to one yoke arm; its shaft = elevation axis
 5. **Flanged bearing** on opposite arm takes the other end of the EL shaft
