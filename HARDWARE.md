@@ -146,3 +146,20 @@ All STS3250 servos ship with **ID=1** by default. You must assign unique IDs bef
 - Baud rate: **1000000 bps** (default, must match firmware)
 - Operating mode: **Position mode** (default)
 - Acceleration: set to **50** for gentle antenna-safe starts
+
+---
+
+## Power Options
+
+### Phase 1 (current) — Mains 220V
+- 12V 10A switching power supply (already ordered) → barrel jack into enclosure
+- Simple, reliable for home/field use with generator
+
+### Phase 2 (future) — Portable Solar
+| Component | Spec | Notes |
+|---|---|---|
+| Solar panel | 50W monocrystalline 12V | AliExpress: `50W monocrystalline solar panel 12V` ~€30 |
+| MPPT controller | 10A 12V | AliExpress: `MPPT solar charge controller 10A 12V` ~€10 |
+| LiFePO4 battery | 12V 20Ah | Buffer for clouds/night. ~€70 |
+
+Estimated daily balance: ~200Wh generated vs ~192Wh consumed → autonomous all day in summer.
